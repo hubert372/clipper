@@ -23,7 +23,7 @@ nav button:hover{color:var(--text);background:var(--fill)}
 nav button.on{color:var(--cyan);border-left-color:var(--cyan);background:linear-gradient(90deg,rgba(88,230,255,.12),transparent)}
 nav button:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
 nav .n{font-size:12px;color:var(--ink);background:var(--cyan);border-radius:9px;padding:0 7px;font-weight:700}
-nav .foot{margin-top:auto;font-size:12px;color:var(--sub);padding:0 10px;line-height:1.6}
+nav .foot{margin-top:auto;font-size:12px;color:var(--sub);padding:10px 4px 0;line-height:1.6}
 main{overflow:auto;padding:26px 30px 60px}
 h1{font:700 30px/1.1 var(--head);letter-spacing:.4px;margin-bottom:4px}
 h2{font:600 17px var(--head);letter-spacing:.3px;margin:26px 0 10px}
@@ -148,6 +148,15 @@ const src = c => '/clips/' + encodeURIComponent(c.file || '') + '?v=' + (c.rev |
 const clip = id => S.clips.find(c => c.id === id);
 
 function go(v, id) { view = v; try { localStorage.setItem('clipper_view', v); } catch {} if (id) sel = id; sig = ''; drawNav(); draw(true); $('view').scrollTop = 0; }
+let updating = '';
+async function checkUpdate() {
+  updating = 'Sprawdzam…'; drawNav();
+  const r = await post('/api/update', {}, true);
+  if (r.error) { updating = ''; drawNav(); return toast(r.error); }
+  if (!r.updated) { updating = ''; drawNav(); return toast('Masz najnowszą wersję'); }
+  updating = 'Instaluję…'; drawNav(); toast('Pobrano aktualizację. Clipper uruchomi się ponownie.');
+  const wait = setInterval(async () => { try { const s = await (await fetch('/api/state')).json(); if (s.version !== S.version) { clearInterval(wait); location.reload(); } } catch {} }, 1500);
+}
 function drawNav() {
   const live = S ? S.channels.filter(c => c.state === 'live').length : 0;
   const last = S && S.clips.find(c => c.status === 'ready');
@@ -156,7 +165,8 @@ function drawNav() {
       Na żywo: <b>${live} z ${S.channels.length}</b><br>W kolejce: <b>${S.queue}</b><br>Ostatni klip: <b>${last ? when(last.created) : 'brak'}</b>
       <button class="b ${S.paused ? 'go' : ''}" onclick="post('/api/pause',{paused:${!S.paused}})">${S.paused ? 'Start' : 'Pauza'}</button></div>` : '') +
     VIEWS.map(([k, t]) => { const n = k === 'channels' ? live : k === 'clips' && S ? ready().filter(c => c.review === 'new').length : 0;
-      return `<button class="${k === view ? 'on' : ''}" onclick="go('${k}')">${t}${n ? `<span class="n">${n}</span>` : ''}</button>`; }).join('');
+      return `<button class="${k === view ? 'on' : ''}" onclick="go('${k}')">${t}${n ? `<span class="n">${n}</span>` : ''}</button>`; }).join('') +
+    `<div class="foot">${S ? 'Wersja ' + esc(S.version) : ''}<button class="b" style="width:100%;margin-top:8px;text-align:center" ${updating ? 'disabled' : ''} onclick="checkUpdate()">${updating || 'Sprawdź aktualizacje'}</button></div>`;
 }
 
 /* ---------- widoki ---------- */

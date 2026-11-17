@@ -44,13 +44,14 @@ if ($LASTEXITCODE -ne 0) { throw 'Instalacja zaleznosci nie powiodla sie.' }
 if ($LASTEXITCODE -ne 0) { Write-Host 'Okno aplikacji niedostepne - panel bedzie sie otwieral w przegladarce.' -ForegroundColor Yellow }
 Copy-Item (Join-Path $dir 'requirements.txt') (Join-Path $dir '.venv\req.txt') -Force
 
+$pyw = Join-Path $dir '.venv\Scripts\pythonw.exe'
 $ws = New-Object -ComObject WScript.Shell
 $lnk = $ws.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Clipper.lnk'))
-$lnk.TargetPath = Join-Path $dir 'start.bat'
+$lnk.TargetPath = $pyw
+$lnk.Arguments = '"' + (Join-Path $dir 'app.py') + '"'
 $lnk.WorkingDirectory = $dir
 $lnk.IconLocation = Join-Path $dir 'clipper.ico'
-$lnk.WindowStyle = 7
 $lnk.Save()
 
 Write-Host 'Gotowe. Na pulpicie jest skrot "Clipper". Uruchamiam...' -ForegroundColor Green
-Start-Process (Join-Path $dir 'start.bat') -WorkingDirectory $dir
+Start-Process $pyw -ArgumentList ('"' + (Join-Path $dir 'app.py') + '"') -WorkingDirectory $dir

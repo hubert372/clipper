@@ -1185,6 +1185,7 @@ class App:
                 "settings": {**self.settings, "ai_key": MASK if self.settings["ai_key"] else ""},
                 "disk": self.disk(),
                 "paused": self.paused,
+                "version": getattr(self, "version", ""),
                 "cap_styles": CAP_STYLES,
                 "ai_status": AI_STATUS,
                 "queue": sum(1 for c in self.clips if c["status"] in ("pending", "processing")),
@@ -1211,6 +1212,28 @@ class App:
                     self.save()
                     return {"error": "Kanał dodany, ale AI nie jest gotowe. " + ai_missing(self.settings)}
                 self.channels[name].ai = {"state": "waiting", "note": ""}
+        elif path == "/api/update":
+            try:
+                changed = update_now()
+            except Exception as e:
+                return {"error": "Nie udało się sprawdzić aktualizacji: " + str(e)[:200]}
+            if not changed:
+                return {"ok": True, "updated": False}
+            self.log("Pobrano nowa wersje - uruchamiam ponownie")
+            self.restart = True
+
+            def bye():
+                time.sleep(1.2)            # daj panelowi czas na odebranie odpowiedzi
+                try:
+                    import webview
+                    for w in list(webview.windows):
+                        w.destroy()
+                except Exception:
+                    pass
+                self.quit.set()
+            threading.Thread(target=bye, daemon=True).start()
+            self.save()
+            return {"ok": True, "updated": True}
         elif path == "/api/ai/login":
             exe = which("claude")
             if not exe:
@@ -1440,6 +1463,62 @@ class Handler(BaseHTTPRequestHandler):
         self._send(400 if "error" in res else 200, res)
 
 
+# ---------------------------------------------------------------- aktualizacje
+def git(*args, timeout=60):
+    exe = which("git")
+    if not exe or not (BASE / ".git").exists():
+        raise RuntimeError("ta kopia Clippera nie pochodzi z GitHuba (brak Gita lub folderu .git)")
+    r = run([exe, *args], cwd=BASE, timeout=timeout)
+    if r.returncode:
+        raise RuntimeError((r.stderr or r.stdout).strip()[-200:] or "git zwrocil blad")
+    return r.stdout.strip()
+
+
+def current_version():
+    try:
+        return git("log", "-1", "--format=%h, %cd", "--date=format:%d.%m %H:%M", timeout=15)
+    except Exception:
+        return "nieznana"
+
+
+def update_now():
+    """Pobiera nowa wersje z GitHuba. Zwraca True, jesli cos sie zmienilo."""
+    git("fetch", "-q", "origin", timeout=20)
+    if git("rev-list", "--count", "HEAD..@{u}") == "0":
+        return False
+    git("pull", "--ff-only", "-q")
+    req, mark = BASE / "requirements.txt", BASE / ".venv" / "req.txt"
+    if mark.parent.exists() and (not mark.exists() or mark.read_bytes() != req.read_bytes()):
+        r = run([sys.executable, "-m", "pip", "install", "-q", "-r", str(req)], timeout=900)
+        if r.returncode == 0:
+            shutil.copyfile(req, mark)
+    return True
+
+
+def relaunch():
+    args = [a for a in sys.argv[1:] if a != "--restarted"]
+    subprocess.Popen([sys.executable, str(BASE / "app.py"), *args, "--restarted"], cwd=str(BASE),
+                     creationflags=NO_WINDOW)
+
+
+def fix_shortcut():
+    """Windows: skrot na pulpicie ma uruchamiac Clipper bez okna konsoli (pythonw zamiast start.bat)."""
+    mark = DATA / "shortcut_ok"
+    if os.name != "nt" or mark.exists() or not sys.executable.lower().endswith("pythonw.exe"):
+        return
+    q = lambda p: str(p).replace("'", "''")
+    script = (
+        "$p = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Clipper.lnk'; if (Test-Path $p) { "
+        "$l = (New-Object -ComObject WScript.Shell).CreateShortcut($p); "
+        "$l.TargetPath = '%s'; $l.Arguments = '\"%s\"'; $l.WorkingDirectory = '%s'; $l.IconLocation = '%s'; "
+        "$l.WindowStyle = 1; $l.Save() }" % (q(sys.executable), q(BASE / "app.py"), q(BASE), q(BASE / "clipper.ico")))
+    try:
+        if run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], timeout=60).returncode == 0:
+            mark.write_text("ok")
+    except Exception:
+        pass
+
+
 def set_window_icon(title, ico):
     """Windows: podmienia ikone okna i paska zadan na ikone Clippera."""
     import ctypes
@@ -1487,12 +1566,28 @@ def open_window(url):
 
 
 def main():
+    restarted = "--restarted" in sys.argv
+    if not restarted and "--no-update" not in sys.argv:
+        try:                       # cicha aktualizacja przy starcie, bez okna konsoli
+            if update_now():
+                relaunch()
+                return
+        except Exception:
+            pass
     app = App()
     Handler.app = app
+    app.version = current_version()
+    app.quit = threading.Event()
+    app.restart = False
     url = "http://%s:%d" % (HOST, PORT)
-    try:
-        srv = ThreadingHTTPServer((HOST, PORT), Handler)
-    except OSError:
+    srv = None
+    for _ in range(40 if restarted else 1):      # po restarcie poczekaj, az stara kopia zwolni port
+        try:
+            srv = ThreadingHTTPServer((HOST, PORT), Handler)
+            break
+        except OSError:
+            time.sleep(0.5)
+    if srv is None:
         # aplikacja juz dziala - pokaz tylko jej okno
         if not open_window(url):
             webbrowser.open(url)
@@ -1504,14 +1599,14 @@ def main():
     if not which("ffmpeg"):
         app.log("UWAGA: brak ffmpeg - zainstaluj: winget install Gyan.FFmpeg")
     app.start()
-    app.log("Panel: " + url)
+    app.log("Clipper uruchomiony, wersja %s" % app.version)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+    threading.Thread(target=fix_shortcut, daemon=True).start()
     try:
-        if "--browser" in sys.argv or not open_window(url):
+        if "--browser" in sys.argv or "--no-browser" in sys.argv or not open_window(url):
             if "--no-browser" not in sys.argv:
                 webbrowser.open(url)
-            while True:
-                time.sleep(3600)
+            app.quit.wait()
     except KeyboardInterrupt:
         pass
     finally:
@@ -1519,6 +1614,9 @@ def main():
         for ch in app.channels.values():
             ch.stop()
         app.save()
+        srv.server_close()
+        if app.restart:
+            relaunch()
 
 
 if __name__ == "__main__":
