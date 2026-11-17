@@ -501,6 +501,15 @@ refresh(true); setInterval(refresh, 2000);
 document.addEventListener('pointermove', e => { const c = e.target.closest && e.target.closest('.card'); if (c) { const r = c.getBoundingClientRect();
   c.style.setProperty('--mx', e.clientX - r.left + 'px'); c.style.setProperty('--my', e.clientY - r.top + 'px'); } });
 
+/* ---------- glosnosc odtwarzacza zapamietana miedzy klipami i uruchomieniami ---------- */
+let volTimer = 0;
+const setVol = v => { if (S && !v.hasAttribute('muted')) { v.volume = S.settings.player_volume; v.muted = !!S.settings.player_muted; } };
+document.addEventListener('loadedmetadata', e => { if (e.target.tagName === 'VIDEO') setVol(e.target); }, true);
+document.addEventListener('volumechange', e => { const v = e.target;
+  if (v.tagName !== 'VIDEO' || v.hasAttribute('muted') || !S || (v.volume === S.settings.player_volume && v.muted === !!S.settings.player_muted)) return;
+  S.settings.player_volume = v.volume; S.settings.player_muted = v.muted; clearTimeout(volTimer);
+  volTimer = setTimeout(() => fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({player_volume: v.volume, player_muted: v.muted})}), 400); }, true);
+
 /* ---------- tlo: bonsai z bialych kropek, obraca sie z ruchem myszy ---------- */
 (() => {
   const cv = $('bg'), g = cv.getContext('2d');

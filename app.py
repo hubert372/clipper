@@ -67,6 +67,7 @@ DEFAULTS = {
     "highlight_words": "", "kw_color": "#FF4D9D",
     "silence_gap": 2.5,       # przerwy bez mowy dluzsze niz tyle sekund sa wycinane
     "audio_db": 8.0,          # o ile dB glosniej niz zwykle, zeby zrobic klip
+    "player_volume": 1.0, "player_muted": False,   # zapamietana glosnosc odtwarzacza w panelu
     "game_zoom": 1.15,        # przyblizenie gry w ukladzie z kamerka (1 = caly obraz)
     "auto_delete_below": 0,   # klipy z ocena ponizej tej wartosci sa kasowane (0 = wylaczone)
 }
@@ -1041,10 +1042,9 @@ class App:
                     "[b0]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=30:5,"
                     "eq=brightness=-0.3[bg];"
                     "[c0]crop=%s,scale=%d:%d:flags=lanczos,unsharp=5:5:0.8,drawbox=0:0:iw:ih:white@0.85:t=4[cam];"
-                    "[g0]split[g1][g2];[g2]crop=%s,boxblur=12:3[gb];[g1][gb]overlay=W*%g/100:H*%g/100[g3];"
-                    "[g3]crop=iw/%g:ih/%g,scale=1080:608:flags=lanczos[game];"
+                    "[g0]crop=iw/%g:ih/%g,scale=1080:608:flags=lanczos[game];"
                     "[bg][cam]overlay=(W-w)/2:%d[t1];[t1][game]overlay=0:%d,setsar=1[v1]"
-                    % (v, box, cw, chh, box, x, y, zoom, zoom, top, gy))
+                    % (v, box, cw, chh, zoom, zoom, top, gy))
             elif s["layout"] == "crop":
                 fc.append("%sscale=-2:1920,crop=1080:1920,setsar=1[v1]" % v)
             else:
@@ -1365,6 +1365,7 @@ class App:
                 self.settings["cap_style"] = "pop"
             if self.settings["ai_mode"] not in ("api", "cli"):
                 self.settings["ai_mode"] = "api"
+            self.settings["player_volume"] = max(0.0, min(1.0, self.settings["player_volume"]))
             self.settings["auto_delete_below"] = max(0, min(100, self.settings["auto_delete_below"]))
             for k in ("bucket_sec", "window_buckets", "pre_sec", "post_sec", "keyword_hits", "cap_words"):
                 self.settings[k] = max(1, self.settings[k])
@@ -1561,7 +1562,10 @@ def open_window(url):
             except Exception:
                 pass
         win.events.shown += on_shown
-    webview.start()      # blokuje do zamkniecia okna
+    try:                 # zapamietuj dane panelu (np. ostatnia zakladke) miedzy uruchomieniami
+        webview.start(private_mode=False, storage_path=str(DATA / "webview"))
+    except TypeError:
+        webview.start()  # blokuje do zamkniecia okna
     return True
 
 
