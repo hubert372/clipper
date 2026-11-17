@@ -107,7 +107,8 @@ ul.tips{padding-left:18px;margin:6px 0}ul.tips li{margin:5px 0}
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let S = null, view = ['monitor','clips','rating','editor','stats','settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'new', rev: ''}, aiBusy = false, addAI = false;
+let saved = ''; try { saved = localStorage.getItem('clipper_view') || ''; } catch {}
+let S = null, view = ['monitor','clips','rating','editor','stats','settings'].find(v => v === (location.hash.slice(1) || saved)) || 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'new', rev: ''}, aiBusy = false, addAI = false;
 const VIEWS = [['channels', 'Kanały'], ['monitor', 'Monitor'], ['clips', 'Klipy'], ['rating', 'Ocena'], ['editor', 'Edytor'], ['stats', 'Statystyki'], ['settings', 'Ustawienia']];
 
 async function post(path, body, quiet) {
@@ -130,7 +131,7 @@ const total = c => c.score ? c.score.total : null;
 const src = c => '/clips/' + encodeURIComponent(c.file || '') + '?v=' + (c.rev || 0);
 const clip = id => S.clips.find(c => c.id === id);
 
-function go(v, id) { view = v; if (id) sel = id; sig = ''; drawNav(); draw(true); $('view').scrollTop = 0; }
+function go(v, id) { view = v; try { localStorage.setItem('clipper_view', v); } catch {} if (id) sel = id; sig = ''; drawNav(); draw(true); $('view').scrollTop = 0; }
 function drawNav() {
   const live = S ? S.channels.filter(c => c.state === 'live').length : 0;
   const last = S && S.clips.find(c => c.status === 'ready');
@@ -158,7 +159,7 @@ function vChannels() {
   return `<h1>Kanały</h1><p class="lead">Dodaj kanały Twitch. Clipper sam czeka, aż wejdą na żywo, i tnie klip, gdy czat wybuchnie.</p>
   ${warn.map(w => `<div class="card warn">${w}</div>`).join('')}
   <form class="row" style="margin-bottom:16px" onsubmit="event.preventDefault();const i=this.q;if(i.value.trim()){post('/api/channels/add',{name:i.value,ai:addAI});i.value=''}">
-    <input name="q" class="grow" placeholder="Nazwa kanału lub link twitch.tv/…" autocomplete="off"><label class="row sub" style="gap:6px;cursor:pointer" title="Claude obejrzy klatkę ze streama, tytuł, kategorię i czat, a potem sam ustawi opcje kanału. Wymaga AI ustawionego w Ustawieniach."><input type="checkbox" ${addAI ? 'checked' : ''} onchange="addAI=this.checked" style="accent-color:var(--cyan)">AI dobierze ustawienia</label>
+    <input name="q" class="grow" placeholder="Nazwa kanału lub link twitch.tv/…" autocomplete="off">${S.deps.ai ? `<label class="row sub" style="gap:6px;cursor:pointer" title="Claude obejrzy klatkę ze streama, tytuł, kategorię i czat, a potem sam ustawi opcje kanału. Wymaga AI ustawionego w Ustawieniach."><input type="checkbox" ${addAI ? 'checked' : ''} onchange="addAI=this.checked" style="accent-color:var(--cyan)">AI dobierze ustawienia</label>` : ''}
     <button class="b go">Dodaj kanał</button></form>
   <div class="grid">${S.channels.map(c => { const last = c.hist.length ? c.hist[c.hist.length - 1] : 0; return `<div class="card">
     <div class="row"><span class="dot ${c.state}"></span><div class="grow"><div class="name">${esc(c.name)}</div><div class="sub">${statusText(c)}</div></div>
@@ -183,18 +184,20 @@ function chOpts(name) {
   const c = S.channels.find(x => x.name === name), o = c.opts, d = $('chdlg');
   d.innerHTML = `<div class="row"><div class="name grow">Opcje kanału ${esc(name)}</div><button class="link" onclick="chdlg.close()">Zamknij</button></div>
     <p class="sub" style="margin:6px 0 10px">Dotyczą nowych klipów z tego kanału i ponownego renderu w Edytorze. Listy słów i logo ustawiasz w Ustawieniach.</p>
-    ${CH_FIELDS.map(([k, t]) => `<div class="field"><span>${t}</span><button type="button" class="sw ${o[k] ? 'on' : ''}" data-o="${k}" aria-label="${t}" onclick="this.classList.toggle('on')"></button></div>`).join('')}
-    <h2>Obszar kamerki na streamie (w % obrazu)</h2>
+    ${CH_FIELDS.map(([k, t]) => `<div class="field"><span>${t}</span><button type="button" class="sw ${o[k] ? 'on' : ''}" data-o="${k}" aria-label="${t}" onclick="this.classList.toggle('on');camBox()"></button></div>`).join('')}
+    ${S.settings.logo_path ? '' : '<p class="sub" style="color:var(--amber)">Logo zadziała dopiero, gdy wskażesz plik w Ustawieniach.</p>'}
+    <div id="cambox"><h2>Obszar kamerki na streamie (w % obrazu)</h2>
     <div class="row wrap"><select onchange="if(this.value)CAMS[this.value].forEach((v,i)=>document.querySelectorAll('#chdlg [data-cam]')[i].value=v)"><option value="">Szybki wybór…</option>${Object.keys(CAMS).map(k => `<option>${k}</option>`).join('')}</select>
-      ${['Od lewej', 'Od góry', 'Szerokość', 'Wysokość'].map((t, i) => `<label class="sub">${t}<br><input type="number" min="0" max="100" style="width:76px" data-cam value="${o.cam[i]}"></label>`).join('')}</div>
+      ${['Od lewej', 'Od góry', 'Szerokość', 'Wysokość'].map((t, i) => `<label class="sub">${t}<br><input type="number" min="0" max="100" style="width:76px" data-cam value="${o.cam[i]}"></label>`).join('')}</div></div>
     <h2>Wykrywanie tylko dla tego kanału</h2><p class="sub" style="margin-bottom:8px">Puste pole oznacza wartość z Ustawień.</p>
     ${[['multiplier', 'Czułość (× średniej czatu)', 'number'], ['min_msgs', 'Minimum wiadomości w oknie', 'number'], ['keywords', 'Słowa-wyzwalacze', 'text'],
        ['keyword_hits', 'Ile wiadomości ze słowem', 'number'], ['language', 'Język napisów (np. pl, en)', 'text']].map(([k, t, ty]) =>
       `<div class="field"><span>${t}</span><input type="${ty}" step="0.1" data-v="${k}" value="${esc(o[k] ?? '')}" placeholder="${esc(S.settings[k])}" style="width:${ty === 'text' ? 200 : 90}px"></div>`).join('')}
-    <div class="row" style="margin-top:16px"><button class="b" onclick="chdlg.close();post('/api/channels/ai',{name:'${name}'}).then(r=>{if(!r.error)toast('AI dobierze ustawienia, gdy kanał będzie na żywo')})">Dobierz przez AI</button>
+    <div class="row" style="margin-top:16px">${S.deps.ai ? '' : '<!--'}<button class="b" onclick="chdlg.close();post('/api/channels/ai',{name:'${name}'}).then(r=>{if(!r.error)toast('AI dobierze ustawienia, gdy kanał będzie na żywo')})">Dobierz przez AI</button>${S.deps.ai ? '' : '-->'}
       <span class="grow"></span><button class="b go" onclick="saveCh('${name}')">Zapisz opcje</button></div>`;
-  d.showModal();
+  d.showModal(); camBox();
 }
+function camBox() { const b = document.querySelector('#chdlg [data-o=facecam]'); if (b) $('cambox').style.display = b.classList.contains('on') ? '' : 'none'; }
 async function saveCh(name) {
   const opts = {cam: [...document.querySelectorAll('#chdlg [data-cam]')].map(i => +i.value)};
   document.querySelectorAll('#chdlg [data-o]').forEach(b => { opts[b.dataset.o] = b.classList.contains('on'); });
@@ -237,7 +240,7 @@ function vClips() {
     <select onchange="filt.ch=this.value;sig='';draw(true)"><option value="">Wszystkie kanały</option>${chans.map(n => `<option ${n === filt.ch ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
     <select onchange="filt.rev=this.value;sig='';draw(true)"><option value="">Wszystkie</option><option value="new" ${filt.rev === 'new' ? 'selected' : ''}>Do przejrzenia</option><option value="ok" ${filt.rev === 'ok' ? 'selected' : ''}>Zatwierdzone</option></select>
     <select onchange="filt.sort=this.value;sig='';draw(true)"><option value="new">Najnowsze</option><option value="score" ${filt.sort === 'score' ? 'selected' : ''}>Najwyżej ocenione</option></select>
-    <button class="b" onclick="zip()">Pobierz zatwierdzone (ZIP)</button>
+    ${ready().some(c => c.review === 'ok') ? `<button class="b" onclick="zip()">Pobierz zatwierdzone (ZIP)</button>` : ''}
     <button class="b" onclick="post('/api/open-folder',{})">Otwórz folder</button></div>
   <div class="clips" style="margin-top:16px">${list.map(clipCard).join('') || '<div class="empty">Klipy pojawią się tutaj, gdy czat na którymś kanale wybuchnie.</div>'}</div>`;
 }
@@ -269,7 +272,7 @@ function vRating() {
       <h2>Co poprawić</h2>${sc.tips.length ? `<ul class="tips">${sc.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : '<p class="sub">Nic do poprawy według lokalnych reguł.</p>'}
       <div class="row" style="margin-top:10px">${c.src ? `<button class="b" onclick="go('editor','${c.id}')">Otwórz w edytorze</button>` : ''}</div></div>
     <div class="card" style="margin-top:14px"><div class="row"><div class="name grow">Ocena AI</div>
-      <button class="b go" ${aiBusy ? 'disabled' : ''} onclick="askAI('${c.id}')">${aiBusy ? 'Oceniam…' : ai ? 'Oceń ponownie' : 'Oceń przez AI'}</button></div>
+      ${S.deps.ai ? `<button class="b go" ${aiBusy ? 'disabled' : ''} onclick="askAI('${c.id}')">${aiBusy ? 'Oceniam…' : ai ? 'Oceń ponownie' : 'Oceń przez AI'}</button>` : `<button class="b" onclick="go('settings')">Włącz AI w Ustawieniach</button>`}</div>
       ${ai ? `<p style="margin:10px 0"><b class="num ${cls(ai.score)}" style="font-size:24px">${esc(ai.score)}</b> / 100. ${esc(ai.verdict)}</p>
         <ul class="tips">${(ai.tips || []).map(t => `<li>${esc(t)}</li>`).join('')}</ul>
         ${ai.title ? `<div class="row wrap" style="margin-top:10px"><span class="grow">Propozycja: <b>${esc(ai.title)}</b><br><span class="sub">${esc(ai.hashtags || '')}</span></span>
@@ -287,12 +290,12 @@ function vEditor() {
   <div class="split">${clipList(list, 'editor')}<div class="card">
     <div class="row wrap" style="gap:18px;align-items:flex-start"><video src="${src(c)}#t=0.5" controls preload="metadata" style="width:190px;aspect-ratio:9/16;background:#000"></video>
     <div class="grow" style="min-width:260px">
-      <label class="sub">Tytuł</label><input id="e_title" style="width:100%;margin:4px 0 12px" value="${esc(c.title)}">
-      <label class="sub">Hashtagi</label><input id="e_tags" style="width:100%;margin:4px 0 12px" value="${esc(c.tags)}">
+      <label class="sub">Tytuł</label><input id="e_title" oninput="trim()" style="width:100%;margin:4px 0 12px" value="${esc(c.title)}">
+      <label class="sub">Hashtagi</label><input id="e_tags" oninput="trim()" style="width:100%;margin:4px 0 12px" value="${esc(c.tags)}">
       <label class="sub">Początek: <b class="num" id="l_in"></b> s</label><input type="range" id="e_in" min="0" max="${c.raw_dur}" step="0.1" value="${c.t_in}" oninput="trim(this)">
       <label class="sub">Koniec: <b class="num" id="l_out"></b> s</label><input type="range" id="e_out" min="0" max="${c.raw_dur}" step="0.1" value="${c.t_out}" oninput="trim(this)">
       <p class="sub" style="margin:6px 0 12px">Źródło ma ${c.raw_dur} s. Długość klipu: <b class="num" id="l_len"></b> s.</p>
-      <div class="row wrap"><button class="b" onclick="saveEdit(false)">Zapisz opis</button><button class="b go" onclick="saveEdit(true)">Renderuj ponownie</button></div></div></div>
+      <div class="row wrap"><button class="b" id="e_save" disabled onclick="saveEdit(false)">Zapisz opis</button><button class="b go" onclick="saveEdit(true)">Renderuj ponownie</button></div></div></div>
     <h2>Napisy</h2>${w.length ? `<p class="sub" style="margin-bottom:8px">Wyczyść pole, żeby usunąć słowo. Przygaszone słowa są poza przyciętym fragmentem.</p>
       <div class="words" id="e_words">${w.map((x, i) => `<input data-s="${x[0]}" value="${esc(x[2])}" size="${Math.max(2, x[2].length)}">`).join('')}</div>`
       : '<p class="sub">Ten klip nie ma transkrypcji.</p>'}</div></div>`;
@@ -301,6 +304,7 @@ function trim(el) {
   const a = $('e_in'), b = $('e_out'); if (!a) return;
   if (+b.value - +a.value < 3) { if (el === a) a.value = +b.value - 3; else b.value = +a.value + 3; }
   $('l_in').textContent = (+a.value).toFixed(1); $('l_out').textContent = (+b.value).toFixed(1); $('l_len').textContent = (b.value - a.value).toFixed(1);
+  const c = clip(sel); if (c) $('e_save').disabled = $('e_title').value === (c.title || '') && $('e_tags').value === (c.tags || '');
   document.querySelectorAll('#e_words input').forEach(i => i.classList.toggle('out', +i.dataset.s < +a.value || +i.dataset.s > +b.value));
 }
 async function saveEdit(render) {
@@ -354,25 +358,48 @@ const FIELDS = [
   ['AI (ocena klipów i dobór ustawień kanału)', [['ai_mode', 'Skąd AI', 'sel', [['api', 'Klucz API Anthropic'], ['cli', 'Claude Code (logowanie kontem Claude)']]],
     ['ai_key', 'Klucz API (tylko dla trybu z kluczem)', 'pass'], ['ai_model', 'Model (tylko dla trybu z kluczem)', 'text']]],
 ];
+// pola widoczne tylko wtedy, gdy ma to sens (np. styl napisow tylko przy wlaczonych napisach)
+const DEP = {whisper_model: 'captions', language: 'captions', cap_font: 'captions', cap_size: 'captions', cap_color: 'captions', cap_highlight: 'captions',
+  cap_pos: 'captions', cap_words: 'captions', cap_upper: 'captions', keyword_hits: 'keywords', multiplier: 'auto_clip', min_msgs: 'auto_clip',
+  cooldown_sec: 'auto_clip', logo_pos: 'logo_path', kw_color: 'highlight_words', ai_mode: 'aiopen', ai_key: 'aiopen,ai_mode=api', ai_model: 'aiopen,ai_mode=api'};
+let aiEdit = false, aiTesting = false, snap = '';
+function collect() { const out = {}; document.querySelectorAll('#fields [data-k]').forEach(el => { out[el.dataset.k] = el.classList.contains('sw') ? el.classList.contains('on') : el.value; }); return out; }
+function applyDeps() {
+  if (!$('fields')) return;
+  const cur = collect(), aiopen = !S.ai_status.ok || aiEdit;
+  const ok = d => d === 'aiopen' ? aiopen : d.includes('=') ? String(cur[d.split('=')[0]]) === d.split('=')[1] : !!cur[d];
+  document.querySelectorAll('#fields [data-dep]').forEach(f => { f.style.display = f.dataset.dep.split(',').every(ok) ? '' : 'none'; });
+  const dirty = JSON.stringify(cur) !== snap, b = $('savebtn');
+  b.disabled = !dirty; b.textContent = dirty ? 'Zapisz zmiany' : 'Wszystko zapisane';
+  const st = S.ai_status, mode = cur.ai_mode, name = S.settings.ai_mode === 'cli' ? 'Claude Code' : 'klucz API';
+  $('aibox').innerHTML = st.ok && !aiEdit
+    ? `<p style="color:var(--mint)">AI działa (${name}). Ostatnio sprawdzone ${when(st.at)}.</p><div class="row wrap" style="margin-top:10px">
+        <button class="b" ${aiTesting ? 'disabled' : ''} onclick="aiTest()">${aiTesting ? 'Sprawdzam…' : 'Sprawdź ponownie'}</button><button class="link" onclick="aiEdit=true;applyDeps()">Zmień sposób połączenia</button></div>`
+    : `${st.checking ? '<p style="color:var(--amber)">Czekam, aż dokończysz logowanie w oknie Claude Code. Potwierdzę sam, gdy zadziała.</p>'
+        : st.ok === false ? `<p style="color:var(--hot)">AI nie działa: ${esc(st.msg)}</p>` : ''}
+      <div class="row wrap" style="margin-top:10px">${mode === 'cli' && !st.checking ? '<button class="b go" onclick="aiLogin()">Zaloguj do Claude Code</button>' : ''}
+        <button class="b" ${aiTesting ? 'disabled' : ''} onclick="aiTest()">${aiTesting ? 'Sprawdzam…' : 'Sprawdź połączenie'}</button></div>
+      <p class="sub" style="margin-top:8px">${mode === 'cli' ? 'Logowanie otwiera oficjalne okno Claude Code i stronę Anthropic. Clipper nie widzi hasła.' : 'Wpisz klucz i sprawdź połączenie.'}</p>`;
+}
 function vSettings() {
-  return `<div class="row"><h1 class="grow">Ustawienia</h1><button class="b go" onclick="saveSettings()">Zapisz ustawienia</button></div>
+  return `<div class="row"><h1 class="grow">Ustawienia</h1><button class="b go" id="savebtn" disabled onclick="saveSettings()">Wszystko zapisane</button></div>
   <p class="lead">Zmiany dotyczą nowych klipów. Styl napisów zadziała też przy ponownym renderze w Edytorze.</p>
-  <div id="fields" class="grid big">${FIELDS.map(([title, fs]) => `<div class="card"><h2 style="margin-top:0">${title}</h2>${fs.map(([k, label, type, opt]) => { const v = S.settings[k];
+  <div id="fields" class="grid big" oninput="applyDeps()" onclick="setTimeout(applyDeps)">${FIELDS.map(([title, fs]) => `<div class="card"><h2 style="margin-top:0">${title}</h2>${fs.map(([k, label, type, opt]) => { const v = S.settings[k];
     const ctl = type === 'bool' ? `<button type="button" class="sw ${v ? 'on' : ''}" data-k="${k}" aria-label="${label}" onclick="this.classList.toggle('on')"></button>`
       : type === 'sel' ? `<select data-k="${k}">${opt.map(([a, t]) => `<option value="${a}" ${a === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`
       : type === 'num' ? `<input type="number" min="0" step="${opt}" data-k="${k}" value="${v}">`
       : type === 'color' ? `<input type="color" data-k="${k}" value="${esc(v)}">`
       : `<input type="${type === 'pass' ? 'password' : 'text'}" data-k="${k}" value="${esc(v)}" autocomplete="off">`;
-    return `<div class="field"><span>${label}</span>${ctl}</div>`; }).join('')}${title.startsWith('AI') ? `<div class="row wrap" style="margin-top:12px">
-      <button class="b go" onclick="aiLogin()">Zaloguj do Claude Code</button><button class="b" id="aitest" onclick="aiTest()">Sprawdź połączenie</button></div>
-      <p class="sub" style="margin-top:8px">Logowanie otwiera oficjalne okno Claude Code i stronę Anthropic w przeglądarce. Clipper nie widzi hasła.</p>` : ''}</div>`).join('')}</div>`;
+    return `<div class="field" ${DEP[k] ? `data-dep="${DEP[k]}"` : ''}><span>${label}</span>${ctl}</div>`; }).join('')}${title.startsWith('AI') ? '<div id="aibox"></div>' : ''}</div>`).join('')}</div>`;
 }
-async function aiLogin() { const r = await post('/api/ai/login', {}); if (!r.error) { toast('Dokończ logowanie w oknie Claude Code, potem kliknij Sprawdź połączenie'); draw(true); } }
-async function aiTest() { const b = $('aitest'); b.disabled = true; b.textContent = 'Sprawdzam…'; const r = await post('/api/ai/test', {}, true);
-  toast(r.error || 'AI działa'); b.disabled = false; b.textContent = 'Sprawdź połączenie'; }
-async function saveSettings() {
-  const out = {}; document.querySelectorAll('#fields [data-k]').forEach(el => { out[el.dataset.k] = el.classList.contains('sw') ? el.classList.contains('on') : el.value; });
-  const r = await post('/api/settings', out); if (!r.error) { toast('Zapisano ustawienia'); draw(true); }
+async function saveSettings(quiet) {
+  const r = await post('/api/settings', collect()); if (!r.error) { aiEdit = false; if (!quiet) toast('Zapisano ustawienia'); draw(true); } return r;
+}
+async function aiLogin() { if (JSON.stringify(collect()) !== snap) await saveSettings(true); const r = await post('/api/ai/login', {}); if (!r.error) { aiEdit = false; draw(true); } }
+async function aiTest() {
+  if ($('fields') && JSON.stringify(collect()) !== snap) await saveSettings(true);
+  aiTesting = true; applyDeps(); const r = await post('/api/ai/test', {}, true); aiTesting = false; aiEdit = false;
+  toast(r.error || 'AI działa'); view === 'settings' ? draw(true) : 0;
 }
 
 /* ---------- petla ---------- */
@@ -385,7 +412,9 @@ function draw(force) {
   if (!force && view === 'channels' && document.activeElement && document.activeElement.name === 'q') return;
   sig = s2;
   const log = $('log'), top = log ? log.scrollTop : null;
-  $('view').innerHTML = RENDER[view]();
+  $('view').innerHTML = (S.paused ? `<div class="card warn row" style="border-color:var(--violet);color:var(--text)"><span class="grow">Clipper jest wstrzymany. Kanały nie są nagrywane i klipy nie powstają.</span>
+    <button class="b go" onclick="post('/api/pause',{paused:false})">Start</button></div>` : '') + RENDER[view]();
+  if (view === 'settings') { snap = JSON.stringify(collect()); applyDeps(); }
   if ($('log')) $('log').scrollTop = top == null ? 1e6 : top;
   if (view === 'editor') trim();
 }
@@ -393,7 +422,7 @@ async function refresh(force) {
   try { S = await (await fetch('/api/state')).json(); } catch { return; }
   const ids = new Set(ready().map(c => c.id));
   if (known && S.settings.notify_sound && [...ids].some(i => !known.has(i))) { beep(); toast('Nowy klip jest gotowy'); }
-  known = ids; drawNav(); draw(force === true);
+  known = ids; drawNav(); draw(force === true); if (view === 'settings' && force !== true) applyDeps();
 }
 refresh(true); setInterval(refresh, 2000);
 document.addEventListener('pointermove', e => { const c = e.target.closest && e.target.closest('.card'); if (c) { const r = c.getBoundingClientRect();

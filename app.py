@@ -348,7 +348,21 @@ def claude_cli(content):
     return str(data.get("result", ""))
 
 
+AI_STATUS = {"ok": None, "msg": "", "at": 0, "checking": False}   # wynik ostatniego zapytania do AI
+
+
 def claude_json(s, content, max_tokens):
+    """Zapytanie do Claude z zapamietaniem, czy polaczenie dziala."""
+    try:
+        out = _claude_json(s, content, max_tokens)
+    except Exception as e:
+        AI_STATUS.update(ok=False, msg=str(e)[:200], at=time.time())
+        raise
+    AI_STATUS.update(ok=True, msg="", at=time.time(), checking=False)
+    return out
+
+
+def _claude_json(s, content, max_tokens):
     """Wysyla zapytanie do Claude (API albo Claude Code) i zwraca obiekt JSON z odpowiedzi."""
     if s["ai_mode"] == "cli":
         text = claude_cli(content)
@@ -699,6 +713,8 @@ class App:
                 pass
         self.settings = {**DEFAULTS, **{k: v for k, v in cfg.get("settings", {}).items() if k in DEFAULTS}}
         self.paused = bool(cfg.get("paused", False))
+        if isinstance(cfg.get("ai_status"), dict):
+            AI_STATUS.update({k: cfg["ai_status"].get(k, AI_STATUS[k]) for k in ("ok", "msg", "at")})
         self.refresh_kw()
         self._disk = (0, {"clips_mb": 0, "rec_mb": 0})
         self.clips = []
@@ -732,7 +748,7 @@ class App:
 
     def save(self):
         with self.lock:
-            CFG.write_text(json.dumps({"settings": self.settings, "paused": self.paused, "channels": [
+            CFG.write_text(json.dumps({"settings": self.settings, "paused": self.paused, "ai_status": AI_STATUS, "channels": [
                 {"name": c.name, "enabled": c.enabled, "opts": c.opts,
                  "ai": c.ai if c.ai["state"] != "working" else {"state": "waiting", "note": ""}}
                 for c in self.channels.values()]},
@@ -988,6 +1004,7 @@ class App:
                 "settings": {**self.settings, "ai_key": MASK if self.settings["ai_key"] else ""},
                 "disk": self.disk(),
                 "paused": self.paused,
+                "ai_status": AI_STATUS,
                 "queue": sum(1 for c in self.clips if c["status"] in ("pending", "processing")),
                 "logs": list(self.logs)[-40:],
                 "deps": {"ffmpeg": bool(which("ffmpeg") and which("ffprobe")), "whisper": whisper_available(),
@@ -1001,6 +1018,8 @@ class App:
             name = parse_channel(body.get("name"))
             if not name:
                 return {"error": "Podaj nazwę kanału albo link twitch.tv/…"}
+            if name in self.channels and not body.get("ai"):
+                return {"error": "Kanał %s jest już na liście" % name}
             if name not in self.channels:
                 self.channels[name] = Channel(self, name)
                 self.channels[name].start()
@@ -1019,7 +1038,23 @@ class App:
             subprocess.Popen([exe, "auth", "login"], cwd=str(DATA),
                              creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
             self.settings["ai_mode"] = "cli"
+            AI_STATUS.update(ok=None, msg="", checking=True)
             self.log("Otwarto logowanie Claude Code; tryb AI ustawiony na Claude Code")
+
+            def wait_for_login():      # po zalogowaniu samo potwierdza, ze AI dziala
+                for _ in range(30):
+                    time.sleep(10)
+                    if not AI_STATUS["checking"] or self.settings["ai_mode"] != "cli":
+                        return
+                    try:
+                        claude_json(self.settings, 'Odpowiedz WYLACZNIE obiektem JSON: {"ok": true}', 50)
+                        self.log("Claude Code zalogowany - AI dziala")
+                        self.save()
+                        return
+                    except Exception:
+                        AI_STATUS.update(ok=None, msg="")
+                AI_STATUS.update(ok=False, msg="Logowanie nie zostało dokończone", checking=False)
+            threading.Thread(target=wait_for_login, daemon=True).start()
         elif path == "/api/ai/test":
             if not ai_ready(self.settings):
                 return {"error": ai_missing(self.settings)}
@@ -1111,6 +1146,7 @@ class App:
             else:
                 subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(CLIPS)])
         elif path == "/api/settings":
+            before = [self.settings[k] for k in ("ai_mode", "ai_key", "ai_model")]
             for k, v in body.items():
                 if k == "ai_key" and v == MASK:
                     continue
@@ -1126,6 +1162,8 @@ class App:
             for k in ("bucket_sec", "window_buckets", "pre_sec", "post_sec", "keyword_hits", "cap_words"):
                 self.settings[k] = max(1, self.settings[k])
             self.refresh_kw()
+            if before != [self.settings[k] for k in ("ai_mode", "ai_key", "ai_model")]:
+                AI_STATUS.update(ok=None, msg="", at=0, checking=False)   # zmiana polaczenia = sprawdz od nowa
         else:
             return {"error": "nieznana akcja"}
         self.save()
