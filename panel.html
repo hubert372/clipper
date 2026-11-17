@@ -558,6 +558,9 @@ refresh(true); setInterval(refresh, 2000);
 document.addEventListener('pointermove', e => { const c = e.target.closest && e.target.closest('.card'); if (c) { const r = c.getBoundingClientRect();
   c.style.setProperty('--mx', e.clientX - r.left + 'px'); c.style.setProperty('--my', e.clientY - r.top + 'px'); } });
 
+// F11 przelacza pelny ekran okna aplikacji (stan jest zapamietywany)
+document.addEventListener('keydown', e => { if (e.key === 'F11') { e.preventDefault(); post('/api/window', {}, true); } });
+
 /* ---------- glosnosc odtwarzacza zapamietana miedzy klipami i uruchomieniami ---------- */
 let volTimer = 0;
 const setVol = v => { if (S && !v.hasAttribute('muted')) { v.volume = S.settings.player_volume; v.muted = !!S.settings.player_muted; } };

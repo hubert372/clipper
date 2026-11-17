@@ -1459,6 +1459,16 @@ class App:
                     self.save()
                     return {"error": "Kanał dodany, ale AI nie jest gotowe. " + ai_missing(self.settings)}
                 self.channels[name].ai = {"state": "waiting", "note": ""}
+        elif path == "/api/window":
+            win, st = WINDOW.get("win"), WINDOW.get("st")
+            if not win:
+                return {"error": "Pełny ekran działa tylko w oknie aplikacji"}
+            try:
+                win.toggle_fullscreen()
+                st["full"] = not st.get("full")
+                WINDOW["file"].write_text(json.dumps(st), "utf-8")
+            except Exception as e:
+                return {"error": "Nie udało się przełączyć pełnego ekranu: " + str(e)[:120]}
         elif path == "/api/update":
             try:
                 changed = update_now()
@@ -1834,6 +1844,9 @@ def set_window_icon(title, ico):
             u.SendMessageW(hwnd, 0x80, kind, h)              # WM_SETICON
 
 
+WINDOW = {}     # okno aplikacji i jego zapamietany stan
+
+
 def open_window(url):
     """Otwiera panel we wlasnym oknie. Zwraca False, gdy pywebview nie jest dostepne."""
     try:
@@ -1851,7 +1864,55 @@ def open_window(url):
         webview.settings["ALLOW_DOWNLOADS"] = True
     except Exception:
         pass
-    win = webview.create_window("Clipper", url, width=1180, height=880, min_size=(420, 600))
+    # zapamietane okno: pozycja (czyli monitor), rozmiar, maksymalizacja i pelny ekran
+    wfile = DATA / "window.json"
+    try:
+        st = json.loads(wfile.read_text("utf-8"))
+    except Exception:
+        st = {}
+    kw = {"width": int(st.get("w") or 1180), "height": int(st.get("h") or 880), "min_size": (420, 600)}
+    try:
+        on_screen = any(sc.x - 50 <= st["x"] < sc.x + sc.width - 100 and sc.y - 50 <= st["y"] < sc.y + sc.height - 100
+                        for sc in webview.screens)
+        if on_screen:                      # monitor nadal jest podlaczony
+            kw.update(x=int(st["x"]), y=int(st["y"]))
+    except Exception:
+        pass
+    try:
+        win = webview.create_window("Clipper", url, maximized=bool(st.get("max")), fullscreen=bool(st.get("full")),
+                                    **kw)
+    except Exception:
+        win = webview.create_window("Clipper", url, width=1180, height=880, min_size=(420, 600))
+    WINDOW.update(win=win, st=st, file=wfile)
+    last = [0.0]
+
+    def keep(force=False, **new):
+        st.update(new)
+        if force or time.time() - last[0] > 1:
+            last[0] = time.time()
+            try:
+                wfile.write_text(json.dumps(st), "utf-8")
+            except OSError:
+                pass
+
+    def normal():
+        return not st.get("max") and not st.get("full") and "MAXIM" not in str(getattr(win, "state", "")).upper()
+
+    def on_moved(*a):
+        if normal() and len(a) >= 2:
+            keep(x=int(a[-2]), y=int(a[-1]))
+
+    def on_resized(*a):
+        if normal() and len(a) >= 2 and int(a[-2]) > 300:
+            keep(w=int(a[-2]), h=int(a[-1]))
+    try:
+        win.events.moved += on_moved
+        win.events.resized += on_resized
+        win.events.maximized += lambda *a: keep(True, max=True)
+        win.events.restored += lambda *a: keep(True, max=False)
+        win.events.closing += lambda *a: keep(True)
+    except Exception:
+        pass
     if os.name == "nt" and ico.exists():
         def on_shown():
             try:
