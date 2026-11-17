@@ -182,7 +182,15 @@ def transcribe(path, model_name, language):
                 _whisper.update(model=model, name=model_name)
 
             def go():
-                segs, _ = _whisper["model"].transcribe(str(path), language=language or None,
+                # dzwiek dekoduje ffmpeg (16 kHz mono), a nie biblioteka PyAV - jej nowe wersje
+                # nie sa zgodne z faster-whisper
+                import numpy as np
+                r = subprocess.run([which("ffmpeg"), "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000",
+                                    "-f", "f32le", "-"], capture_output=True, timeout=300, creationflags=NO_WINDOW)
+                audio = np.frombuffer(r.stdout, dtype=np.float32)
+                if r.returncode or audio.size < 1600:
+                    raise RuntimeError("nie udalo sie odczytac dzwieku z klipu")
+                segs, _ = _whisper["model"].transcribe(audio, language=language or None,
                                                        word_timestamps=True, vad_filter=True)
                 return [(w.start, w.end, w.word.strip()) for s in segs for w in (s.words or []) if w.word.strip()]
             try:
