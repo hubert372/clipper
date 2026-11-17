@@ -34,6 +34,22 @@ w `data/clipper.log`. Panel w przeglądarce zamiast okna: `python app.py --brows
 - **Whisper** (faster-whisper) dodaje napisy. Model pobiera się przy pierwszym klipie.
 - Gotowe klipy trafiają do `data/clips` i do panelu. Przycisk „Klip teraz” robi klip ręcznie.
 
+## Zakładki
+
+- **Kanały** – dodawanie kanałów, status, wykres czatu, dziennik.
+- **Monitor** – duże wykresy czatu wszystkich kanałów z ostatnich 10 minut.
+- **Klipy** – galeria z filtrem kanału, sortowaniem po ocenie, pobieraniem i kopiowaniem opisu.
+- **Ocena** – punktacja 0–100 (reakcja czatu, początek, mowa, napisy, dźwięk, długość)
+  z listą rzeczy do poprawy. Przycisk „Oceń przez AI” wysyła transkrypcję i statystyki
+  do API Anthropic (wymaga własnego klucza w Ustawieniach, płatne za każde zapytanie).
+- **Edytor** – przycinanie początku i końca, poprawianie słów w napisach, tytuł i hashtagi,
+  ponowny render.
+- **Statystyki** – klipy na kanał, godziny, powody klipów, najlepsze klipy, miejsce na dysku.
+- **Ustawienia** – wykrywanie, słowa-wyzwalacze, styl napisów, powiadomienia (dźwięk,
+  webhook Discorda), klucz AI.
+
+Klucz API i webhook są zapisywane lokalnie w `data/config.json`.
+
 ## Dobrze wiedzieć
 
 - Pierwsze ~60 s po dodaniu kanału aplikacja zbiera średnią czatu i nie robi klipów.

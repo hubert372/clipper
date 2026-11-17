@@ -5,194 +5,363 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clipper</title>
 <style>
-:root{--bg:#f2f2f7;--card:#fff;--text:#1c1c1e;--sub:#8e8e93;--line:rgba(60,60,67,.12);--fill:rgba(120,120,128,.12);
---blue:#007aff;--green:#34c759;--red:#ff3b30;--orange:#ff9500;--bar:#c7c7cc}
-@media(prefers-color-scheme:dark){:root{--bg:#000;--card:#1c1c1e;--text:#fff;--sub:#8e8e93;--line:rgba(84,84,88,.5);
---fill:rgba(120,120,128,.24);--blue:#0a84ff;--green:#30d158;--red:#ff453a;--orange:#ff9f0a;--bar:#48484a}}
+:root{--ink:#070b14;--panel:rgba(14,21,36,.78);--edge:rgba(88,230,255,.16);--text:#dfe9f7;--sub:#7f8da8;
+--cyan:#58e6ff;--violet:#8f7bff;--hot:#ff4d9d;--mint:#7dffb0;--amber:#ffc65c;--fill:rgba(127,141,168,.14);
+--head:"Bahnschrift","DIN Alternate","Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;
+--body:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif}
 *{box-sizing:border-box;margin:0}
-body{font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;background:var(--bg);
-color:var(--text);-webkit-font-smoothing:antialiased}
-main{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
-header{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:20px}
-h1{font-size:34px;font-weight:700;letter-spacing:-.4px}
-h2{font-size:22px;font-weight:700;margin:34px 0 12px}
+html,body{height:100%}
+body{font:15px/1.45 var(--body);background:var(--ink);color:var(--text);overflow:hidden}
+#bg{position:fixed;inset:0;width:100%;height:100%;z-index:0}
+.app{position:relative;z-index:1;display:grid;grid-template-columns:212px 1fr;height:100%}
+nav{padding:22px 14px;border-right:1px solid var(--edge);background:rgba(7,11,20,.72);backdrop-filter:blur(10px);display:flex;flex-direction:column;gap:4px}
+.brand{font:700 25px/1 var(--head);letter-spacing:.5px;padding:4px 10px 18px;display:flex;align-items:center;gap:10px}
+.brand i{width:12px;height:22px;border-radius:3px;background:linear-gradient(160deg,var(--cyan),var(--violet));box-shadow:0 0 16px var(--cyan)}
+nav button{all:unset;cursor:pointer;padding:10px 12px;font:500 15px var(--head);letter-spacing:.3px;color:var(--sub);border-left:2px solid transparent;
+transition:color .15s,background .15s;display:flex;justify-content:space-between;align-items:center}
+nav button:hover{color:var(--text);background:var(--fill)}
+nav button.on{color:var(--cyan);border-left-color:var(--cyan);background:linear-gradient(90deg,rgba(88,230,255,.12),transparent)}
+nav button:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+nav .n{font-size:12px;color:var(--ink);background:var(--cyan);border-radius:9px;padding:0 7px;font-weight:700}
+nav .foot{margin-top:auto;font-size:12px;color:var(--sub);padding:0 10px;line-height:1.6}
+main{overflow:auto;padding:26px 30px 60px}
+h1{font:700 30px/1.1 var(--head);letter-spacing:.4px;margin-bottom:4px}
+h2{font:600 17px var(--head);letter-spacing:.3px;margin:26px 0 10px}
+.lead{color:var(--sub);margin-bottom:20px;max-width:70ch}
 .sub{color:var(--sub);font-size:13px}
-button{font:inherit;border:0;cursor:pointer;border-radius:10px;padding:8px 14px;background:var(--fill);color:var(--blue);
-font-weight:500;transition:opacity .15s}
-button:hover{opacity:.75}button:disabled{opacity:.35;cursor:default}
-button.primary{background:var(--blue);color:#fff}
-button.plain{background:none;padding:6px 8px}
-button.danger{color:var(--red)}
-input,select{font:inherit;color:var(--text);background:var(--fill);border:0;border-radius:10px;padding:9px 12px;outline:0;min-width:0}
-input:focus,select:focus{box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 30%,transparent)}
-.add{display:flex;gap:8px;margin-bottom:16px}.add input{flex:1}
+.num{font-variant-numeric:tabular-nums;font-family:var(--head)}
+.card{position:relative;background:var(--panel);border:1px solid var(--edge);padding:16px;backdrop-filter:blur(8px);
+clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px));overflow:hidden}
+.card::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .25s;
+background:radial-gradient(260px circle at var(--mx,50%) var(--my,50%),rgba(88,230,255,.16),transparent 65%)}
+.card:hover::before{opacity:1}
+.card>*{position:relative}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
-.card{background:var(--card);border-radius:16px;padding:16px}
-.row{display:flex;align-items:center;gap:10px}.grow{flex:1;min-width:0}
-.name{font-size:17px;font-weight:600;overflow:hidden;text-overflow:ellipsis}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--bar);flex:none}
-.dot.live{background:var(--red)}.dot.waiting{background:var(--orange)}
+.grid.big{grid-template-columns:repeat(auto-fill,minmax(440px,1fr))}
+.row{display:flex;align-items:center;gap:10px}.grow{flex:1;min-width:0}.wrap{flex-wrap:wrap}
+button.b{font:600 14px var(--head);letter-spacing:.3px;border:1px solid var(--edge);background:var(--fill);color:var(--cyan);padding:8px 14px;cursor:pointer;
+clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));transition:background .15s,color .15s}
+button.b:hover{background:rgba(88,230,255,.2)}
+button.b.go{background:var(--cyan);color:var(--ink);border-color:var(--cyan)}button.b.go:hover{background:#9af1ff}
+button.b.bad{color:var(--hot)}button.b:disabled{opacity:.35;cursor:default}
+input,select,textarea{font:inherit;color:var(--text);background:rgba(7,11,20,.7);border:1px solid var(--edge);padding:8px 10px;min-width:0;border-radius:2px}
+input[type=color]{padding:2px;width:46px;height:34px}input[type=range]{padding:0;border:0;background:none;accent-color:var(--cyan);width:100%}
+.name{font:600 18px var(--head);letter-spacing:.3px;overflow:hidden;text-overflow:ellipsis}
+.dot{width:10px;height:10px;border-radius:50%;background:#3a4560;flex:none}
+.dot.live{background:var(--hot);box-shadow:0 0 12px var(--hot);animation:pulse 1.4s infinite}.dot.waiting{background:var(--amber)}
+@keyframes pulse{50%{opacity:.35}}
 .chart{position:relative;height:64px;display:flex;align-items:flex-end;gap:2px;margin:14px 0 10px}
-.chart i{flex:1;background:var(--bar);border-radius:2px;min-height:2px}
-.chart i.hot{background:var(--blue)}
-.chart .thr{position:absolute;left:0;right:0;border-top:1px dashed var(--sub);opacity:.7}
-.switch{position:relative;width:51px;height:31px;border-radius:16px;background:var(--fill);padding:0;flex:none;transition:background .2s}
-.switch::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;
-box-shadow:0 2px 4px rgba(0,0,0,.2);transition:transform .2s}
-.switch.on{background:var(--green)}.switch.on::after{transform:translateX(20px)}
-.clips{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
-.clip{background:var(--card);border-radius:16px;overflow:hidden}
-.clip video,.clip .ph{display:block;width:100%;aspect-ratio:9/16;background:#000;object-fit:cover}
-.clip .ph{display:flex;align-items:center;justify-content:center;color:#8e8e93;font-size:13px;text-align:center;padding:12px}
-.clip .meta{padding:10px 12px 12px}
-.clip .t{font-size:13px;font-weight:600}
-.clip .x{font-size:12px;color:var(--sub);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.6em}
-.clip a{color:var(--blue);text-decoration:none;font-size:14px;font-weight:500}
-.empty{color:var(--sub);text-align:center;padding:36px 0}
-.banner{background:color-mix(in srgb,var(--orange) 16%,var(--card));border-radius:14px;padding:12px 16px;margin-bottom:16px;font-size:14px}
-.log{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--sub);max-height:220px;overflow:auto;white-space:pre-wrap}
-dialog{border:0;border-radius:18px;background:var(--bg);color:var(--text);padding:0;width:min(520px,94vw);max-height:90vh}
-dialog::backdrop{background:rgba(0,0,0,.35);backdrop-filter:blur(6px)}
-.sheet-h{display:flex;justify-content:space-between;align-items:center;padding:14px 16px}
-.sheet-h b{font-size:17px}
-.group{background:var(--card);border-radius:12px;margin:0 16px 18px}
-.field{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;min-height:50px}
-.field+.field{border-top:1px solid var(--line)}
-.field input[type=number]{width:84px;text-align:right}.field input[type=text]{width:170px}
-.gl{font-size:13px;color:var(--sub);margin:0 30px 6px;text-transform:uppercase}
+.chart.tall{height:150px}
+.chart i{flex:1;background:linear-gradient(var(--violet),rgba(143,123,255,.25));min-height:2px}
+.chart i.hot{background:linear-gradient(var(--hot),var(--violet));box-shadow:0 0 10px var(--hot)}
+.chart .thr{position:absolute;left:0;right:0;border-top:1px dashed var(--cyan);opacity:.7}
+.sw{position:relative;width:46px;height:24px;border:1px solid var(--edge);background:var(--fill);cursor:pointer;padding:0;flex:none;border-radius:2px}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;background:var(--sub);transition:transform .18s,background .18s}
+.sw.on{border-color:var(--mint)}.sw.on::after{transform:translateX(22px);background:var(--mint);box-shadow:0 0 10px var(--mint)}
+.clips{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+.clip{padding:0}.clip video,.clip .ph{display:block;width:100%;aspect-ratio:9/16;background:#000;object-fit:cover}
+.clip .ph{display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:13px;text-align:center;padding:14px}
+.clip .meta{padding:10px 12px 12px}.clip .t{font:600 14px var(--head);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{position:absolute!important;top:10px;left:10px;font:700 15px var(--head);padding:2px 9px;background:rgba(7,11,20,.85);border:1px solid currentColor}
+.good{color:var(--mint)}.mid{color:var(--cyan)}.low{color:var(--hot)}
+.link{all:unset;cursor:pointer;color:var(--cyan);font-size:13px}.link:hover{text-decoration:underline}.link.bad{color:var(--hot)}
+.empty{color:var(--sub);padding:40px 0;text-align:center;grid-column:1/-1}
+.warn{border-color:var(--amber);color:var(--amber);margin-bottom:14px;font-size:14px}
+.log{font:12px/1.65 Consolas,ui-monospace,monospace;color:var(--sub);max-height:200px;overflow:auto;white-space:pre-wrap}
+.split{display:grid;grid-template-columns:minmax(240px,320px) 1fr;gap:16px;align-items:start}
+.list button{all:unset;cursor:pointer;display:flex;gap:10px;align-items:center;padding:9px 10px;width:100%;box-sizing:border-box;border-left:2px solid transparent}
+.list button:hover{background:var(--fill)}.list button.on{border-left-color:var(--cyan);background:rgba(88,230,255,.1)}
+.ring{width:118px;height:118px;border-radius:50%;display:grid;place-items:center;flex:none;font:700 38px var(--head)}
+.ring span{width:94px;height:94px;border-radius:50%;background:#0b111e;display:grid;place-items:center}
+.part{display:grid;grid-template-columns:110px 1fr 54px;gap:10px;align-items:center;margin:7px 0;font-size:14px}
+.bar{height:8px;background:var(--fill)}.bar b{display:block;height:100%;background:linear-gradient(90deg,var(--violet),var(--cyan))}
+ul.tips{padding-left:18px;margin:6px 0}ul.tips li{margin:5px 0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:8px}
+.tile b{display:block;font:700 30px var(--head)}
+.hbar{display:grid;grid-template-columns:130px 1fr 40px;gap:10px;align-items:center;margin:6px 0;font-size:14px}
+.field{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 0;border-top:1px solid rgba(127,141,168,.14)}
+.field:first-of-type{border-top:0}.field input[type=number]{width:90px;text-align:right}.field input[type=text],.field input[type=password]{width:min(300px,50vw)}
+.words{display:flex;flex-wrap:wrap;gap:5px}.words input{width:auto;padding:4px 6px;font-size:13px}.words input.out{opacity:.4}
+.toast{position:fixed;right:22px;bottom:22px;z-index:5;background:var(--panel);border:1px solid var(--cyan);padding:10px 16px;opacity:0;transform:translateY(8px);transition:.25s;pointer-events:none}
+.toast.on{opacity:1;transform:none}
+@media(max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:auto 1fr}nav{flex-direction:row;overflow:auto;padding:8px;border-right:0;border-bottom:1px solid var(--edge)}
+.brand,nav .foot{display:none}nav button{border-left:0;white-space:nowrap}main{padding:18px 14px 50px}.split{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<main>
-  <header>
-    <div><h1>Clipper</h1><div class="sub" id="summary">Łączenie…</div></div>
-    <button onclick="openSettings()">Ustawienia</button>
-  </header>
-  <div id="banner"></div>
-  <form class="add" onsubmit="addChannel(event)">
-    <input id="newch" placeholder="Nazwa kanału lub link twitch.tv/…" autocomplete="off">
-    <button class="primary">Dodaj kanał</button>
-  </form>
-  <div class="grid" id="channels"></div>
-  <div class="row" style="margin:34px 0 12px"><h2 class="grow" style="margin:0">Klipy</h2>
-    <button onclick="post('/api/open-folder',{})">Otwórz folder</button></div>
-  <div class="clips" id="clips"></div>
-  <h2>Dziennik</h2>
-  <div class="card log" id="log"></div>
-</main>
-
-<dialog id="settings">
-  <div class="sheet-h"><button class="plain" onclick="settings.close()">Anuluj</button><b>Ustawienia</b>
-    <button class="plain" onclick="saveSettings()"><b>Zapisz</b></button></div>
-  <div id="fields"></div>
-</dialog>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="app">
+  <nav id="nav"></nav>
+  <main id="view"></main>
+</div>
+<div class="toast" id="toast"></div>
 
 <script>
 const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let S = null, clipSig = '';
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let S = null, view = ['monitor','clips','rating','editor','stats','settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'new'}, aiBusy = false;
+const VIEWS = [['channels', 'Kanały'], ['monitor', 'Monitor'], ['clips', 'Klipy'], ['rating', 'Ocena'], ['editor', 'Edytor'], ['stats', 'Statystyki'], ['settings', 'Ustawienia']];
 
-const FIELDS = [
-  ['Wykrywanie', [
-    ['auto_clip', 'Automatyczne klipy', 'bool'],
-    ['multiplier', 'Czułość (× średniej czatu)', 'num', 0.1],
-    ['min_msgs', 'Min. wiadomości w oknie', 'num', 1],
-    ['bucket_sec', 'Długość okna (s)', 'num', 1],
-    ['cooldown_sec', 'Przerwa między klipami (s)', 'num', 1]]],
-  ['Klip', [
-    ['pre_sec', 'Sekund przed skokiem', 'num', 1],
-    ['post_sec', 'Sekund po skoku', 'num', 1],
-    ['layout', 'Kadr', 'sel', [['blur', 'Cały obraz + rozmyte tło'], ['crop', 'Przycięcie do środka']]],
-    ['quality', 'Jakość nagrywania', 'sel', [['720p60,720p,best', '720p'], ['1080p60,1080p,best', '1080p'], ['best', 'Najlepsza'], ['480p,worst', '480p']]]]],
-  ['Napisy', [
-    ['captions', 'Napisy (Whisper)', 'bool'],
-    ['whisper_model', 'Model', 'sel', [['tiny', 'tiny – najszybszy'], ['base', 'base'], ['small', 'small'], ['medium', 'medium'], ['large-v3', 'large-v3 – najlepszy']]],
-    ['language', 'Język (puste = auto)', 'text']]],
-  ['Dysk', [['keep_recordings', 'Zachowuj pełne nagrania', 'bool']]],
-];
-
-async function post(path, body) {
-  const r = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-  const j = await r.json();
-  if (j.error) alert(j.error);
-  refresh();
+async function post(path, body, quiet) {
+  let j = {};
+  try { j = await (await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})).json(); }
+  catch { j = {error: 'Brak połączenia z aplikacją'}; }
+  if (j.error && !quiet) toast(j.error);
+  await refresh(true);
+  return j;
 }
-function addChannel(e) { e.preventDefault(); const v = $('newch').value.trim(); if (v) { post('/api/channels/add', {name: v}); $('newch').value = ''; } }
-function removeChannel(n) { if (confirm('Usunąć kanał ' + n + '?')) post('/api/channels/remove', {name: n}); }
-function deleteClip(id) { if (confirm('Usunąć ten klip?')) post('/api/clips/delete', {id}); }
+function toast(t) { const e = $('toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('on'), 3200); }
+function beep() { try { const a = new AudioContext(), o = a.createOscillator(), g = a.createGain(); o.connect(g); g.connect(a.destination);
+  o.frequency.setValueAtTime(660, a.currentTime); o.frequency.setValueAtTime(990, a.currentTime + .12); g.gain.setValueAtTime(.12, a.currentTime);
+  g.gain.exponentialRampToValueAtTime(.001, a.currentTime + .4); o.start(); o.stop(a.currentTime + .4); } catch {} }
+const dur = s => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h} h ${m} min` : `${m} min`; };
+const when = t => new Date(t * 1000).toLocaleString('pl-PL', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
+const ready = () => S.clips.filter(c => c.status === 'ready');
+const cls = n => n >= 75 ? 'good' : n >= 50 ? 'mid' : 'low';
+const total = c => c.score ? c.score.total : null;
+const src = c => '/clips/' + encodeURIComponent(c.file || '') + '?v=' + (c.rev || 0);
+const clip = id => S.clips.find(c => c.id === id);
 
-function dur(sec) { sec = Math.max(0, Math.floor(sec)); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60);
-  return h ? h + ' h ' + m + ' min' : m + ' min'; }
+function go(v, id) { view = v; if (id) sel = id; sig = ''; drawNav(); draw(true); $('view').scrollTop = 0; }
+function drawNav() {
+  const live = S ? S.channels.filter(c => c.state === 'live').length : 0;
+  $('nav').innerHTML = '<div class="brand"><i></i>Clipper</div>' + VIEWS.map(([k, t]) =>
+    `<button class="${k === view ? 'on' : ''}" onclick="go('${k}')">${t}${k === 'channels' && live ? `<span class="n">${live}</span>` : ''}</button>`).join('') +
+    `<div class="foot">${S ? `Kanały na żywo: ${live}<br>Gotowe klipy: ${ready().length}` : ''}</div>`;
+}
 
-function channelCard(c, now) {
-  const max = Math.max(1, ...c.hist, c.thr || 0) * 1.1;
-  const bars = c.hist.map(v => `<i class="${c.thr && v >= c.thr ? 'hot' : ''}" style="height:${v / max * 100}%"></i>`).join('');
-  const thr = c.thr ? `<div class="thr" style="bottom:${c.thr / max * 100}%"></div>` : '';
-  const status = c.state === 'live' ? `Na żywo · ${dur(now - c.live_since)} · ${c.rec_mb} MB`
-    : c.state === 'waiting' ? 'Offline – czekam na stream' : 'Wyłączony';
-  const last = c.hist.length ? c.hist[c.hist.length - 1] : 0;
-  return `<div class="card">
-    <div class="row"><span class="dot ${c.state}"></span>
-      <div class="grow"><div class="name">${esc(c.name)}</div><div class="sub">${status}</div></div>
-      <button class="switch ${c.enabled ? 'on' : ''}" aria-label="Włącz kanał" onclick="post('/api/channels/toggle',{name:'${c.name}',enabled:${!c.enabled}})"></button></div>
-    <div class="chart">${bars}${thr}</div>
-    <div class="row"><div class="sub grow">${c.enabled ? (c.chat ? `Czat: ${last} wiad. / okno` + (c.thr ? ` · próg ${Math.round(c.thr)}` : ' · zbieram średnią') : 'Łączę z czatem…') : ''}</div>
-      <button ${c.state === 'live' ? '' : 'disabled'} onclick="post('/api/clip',{name:'${c.name}'})">Klip teraz</button>
-      <button class="plain danger" onclick="removeChannel('${c.name}')">Usuń</button></div>
-  </div>`;
+/* ---------- widoki ---------- */
+function bars(c, n) {
+  const h = c.hist.slice(-n), max = Math.max(1, ...h, c.thr || 0) * 1.1;
+  return h.map(v => `<i class="${c.thr && v >= c.thr ? 'hot' : ''}" style="height:${v / max * 100}%"></i>`).join('') +
+    (c.thr ? `<div class="thr" style="bottom:${c.thr / max * 100}%"></div>` : '');
+}
+const statusText = c => c.state === 'live' ? `Na żywo od ${dur(S.now - c.live_since)}, nagranie ${c.rec_mb} MB` : c.state === 'waiting' ? 'Offline, czekam na stream' : 'Wyłączony';
+const sw = (on, click, label) => `<button class="sw ${on ? 'on' : ''}" aria-label="${label}" onclick="${click}"></button>`;
+
+function vChannels() {
+  const warn = [];
+  if (!S.deps.ffmpeg) warn.push('Brak FFmpeg, więc klipy nie powstaną. Zainstaluj: winget install Gyan.FFmpeg i uruchom Clipper ponownie.');
+  if (!S.deps.whisper && S.settings.captions) warn.push('Brak faster-whisper, więc klipy będą bez napisów.');
+  return `<h1>Kanały</h1><p class="lead">Dodaj kanały Twitch. Clipper sam czeka, aż wejdą na żywo, i tnie klip, gdy czat wybuchnie.</p>
+  ${warn.map(w => `<div class="card warn">${w}</div>`).join('')}
+  <form class="row" style="margin-bottom:16px" onsubmit="event.preventDefault();const i=this.q;if(i.value.trim()){post('/api/channels/add',{name:i.value});i.value=''}">
+    <input name="q" class="grow" placeholder="Nazwa kanału lub link twitch.tv/…" autocomplete="off"><button class="b go">Dodaj kanał</button></form>
+  <div class="grid">${S.channels.map(c => { const last = c.hist.length ? c.hist[c.hist.length - 1] : 0; return `<div class="card">
+    <div class="row"><span class="dot ${c.state}"></span><div class="grow"><div class="name">${esc(c.name)}</div><div class="sub">${statusText(c)}</div></div>
+      ${sw(c.enabled, `post('/api/channels/toggle',{name:'${c.name}',enabled:${!c.enabled}})`, 'Włącz kanał')}</div>
+    <div class="chart">${bars(c, 30)}</div>
+    <div class="row"><div class="sub grow">${c.enabled ? (c.chat ? `${last} wiad. w oknie` + (c.thr ? `, próg ${Math.round(c.thr)}` : ', zbieram średnią') : 'Łączę z czatem…') : ''}</div>
+      <button class="b" ${c.state === 'live' ? '' : 'disabled'} onclick="post('/api/clip',{name:'${c.name}'})">Klip teraz</button>
+      <button class="link bad" onclick="if(confirm('Usunąć kanał ${c.name}?'))post('/api/channels/remove',{name:'${c.name}'})">Usuń</button></div></div>`; }).join('') ||
+    '<div class="empty">Nie obserwujesz jeszcze żadnego kanału. Wpisz nazwę powyżej.</div>'}</div>
+  <h2>Dziennik</h2><div class="card log" id="log">${esc(S.logs.map(l => new Date(l[0] * 1000).toLocaleTimeString('pl-PL') + '  ' + l[1]).join('\n') || 'Brak zdarzeń.')}</div>`;
+}
+
+function vMonitor() {
+  return `<h1>Monitor</h1><p class="lead">Czat wszystkich kanałów z ostatnich 10 minut. Przerywana linia to próg, powyżej którego powstaje klip.</p>
+  <div class="grid big">${S.channels.map(c => { const last = c.hist.length ? c.hist[c.hist.length - 1] : 0; return `<div class="card">
+    <div class="row"><span class="dot ${c.state}"></span><div class="name grow">${esc(c.name)}</div><span class="sub">${statusText(c)}</span></div>
+    <div class="chart tall">${bars(c, 60)}</div>
+    <div class="row wrap" style="gap:22px"><div><b class="num" style="font-size:26px">${last}</b><div class="sub">wiad. w oknie</div></div>
+      <div><b class="num" style="font-size:26px">${c.thr ? Math.round(c.thr) : '–'}</b><div class="sub">próg</div></div>
+      <div><b class="num" style="font-size:26px">${c.kw}</b><div class="sub">słowa-wyzwalacze</div></div>
+      <span class="grow"></span><button class="b" ${c.state === 'live' ? '' : 'disabled'} onclick="post('/api/clip',{name:'${c.name}'})">Klip teraz</button></div></div>`; }).join('') ||
+    '<div class="empty">Dodaj kanał w zakładce Kanały, żeby zobaczyć jego czat.</div>'}</div>`;
 }
 
 function clipCard(c) {
-  const when = new Date(c.created * 1000).toLocaleString('pl-PL', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
-  const src = '/clips/' + encodeURIComponent(c.file || '');
-  const body = c.status === 'ready' ? `<video src="${src}#t=0.5" controls preload="metadata" playsinline></video>`
-    : `<div class="ph">${c.status === 'error' ? 'Błąd: ' + esc(c.error || '') : c.status === 'processing' ? 'Renderuję…' : 'Czekam na dalszy ciąg…'}</div>`;
-  return `<div class="clip">${body}<div class="meta">
-    <div class="t">${esc(c.channel)} · ${when}</div>
-    <div class="x">${esc(c.text || (c.reason + (c.peak ? ' · ' + c.peak + ' wiad.' : '')))}</div>
-    <div class="row" style="margin-top:6px">${c.status === 'ready' ? `<a class="grow" href="${src}" download>Pobierz</a>` : '<span class="grow"></span>'}
-      ${c.status === 'ready' || c.status === 'error' ? `<button class="plain danger" onclick="deleteClip('${c.id}')">Usuń</button>` : ''}</div>
+  const sc = total(c);
+  const body = c.status === 'ready' ? `<video src="${src(c)}#t=0.5" controls preload="metadata" playsinline></video>`
+    : `<div class="ph">${c.status === 'error' ? 'Nie udało się: ' + esc(c.error || '') : c.status === 'processing' ? 'Renderuję…' : 'Czekam na dalszy ciąg…'}</div>`;
+  return `<div class="card clip">${body}${sc != null && c.status === 'ready' ? `<span class="badge ${cls(sc)}">${sc}</span>` : ''}<div class="meta">
+    <div class="t" title="${esc(c.title)}">${esc(c.title || c.channel)}</div><div class="sub">${esc(c.channel)}, ${when(c.created)}, ${esc(c.reason)}</div>
+    <div class="row wrap" style="margin-top:8px;gap:12px">${c.status === 'ready' ? `<button class="link" onclick="go('rating','${c.id}')">Ocena</button>
+      ${c.src ? `<button class="link" onclick="go('editor','${c.id}')">Edytuj</button>` : ''}<a class="link" href="${src(c)}" download="${esc(c.file)}">Pobierz</a>
+      <button class="link" onclick="copyDesc('${c.id}')">Kopiuj opis</button>` : ''}
+      ${c.status === 'ready' || c.status === 'error' ? `<button class="link bad" onclick="if(confirm('Usunąć ten klip?'))post('/api/clips/delete',{id:'${c.id}'})">Usuń</button>` : ''}</div></div></div>`;
+}
+function vClips() {
+  let list = S.clips.filter(c => !filt.ch || c.channel === filt.ch);
+  if (filt.sort === 'score') list = [...list].sort((a, b) => (total(b) ?? -1) - (total(a) ?? -1));
+  const chans = [...new Set(S.clips.map(c => c.channel))];
+  return `<div class="row wrap"><h1 class="grow">Klipy</h1>
+    <select onchange="filt.ch=this.value;sig='';draw(true)"><option value="">Wszystkie kanały</option>${chans.map(n => `<option ${n === filt.ch ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+    <select onchange="filt.sort=this.value;sig='';draw(true)"><option value="new">Najnowsze</option><option value="score" ${filt.sort === 'score' ? 'selected' : ''}>Najwyżej ocenione</option></select>
+    <button class="b" onclick="post('/api/open-folder',{})">Otwórz folder</button></div>
+  <div class="clips" style="margin-top:16px">${list.map(clipCard).join('') || '<div class="empty">Klipy pojawią się tutaj, gdy czat na którymś kanale wybuchnie.</div>'}</div>`;
+}
+function copyDesc(id) { const c = clip(id), t = (c.title || '') + '\n' + (c.tags || '');
+  (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Skopiowano opis'), () => {
+    const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); toast('Skopiowano opis'); }); }
+
+function pick(listOnly) {
+  const list = [...ready()].sort((a, b) => (total(b) ?? -1) - (total(a) ?? -1)).filter(c => !listOnly || c.src);
+  if (!list.find(c => c.id === sel)) sel = list[0] ? list[0].id : null;
+  return list;
+}
+const clipList = (list, v) => `<div class="card list" style="padding:8px">${list.map(c => `<button class="${c.id === sel ? 'on' : ''}" onclick="go('${v}','${c.id}')">
+  <b class="num ${cls(total(c) ?? 0)}" style="width:30px">${total(c) ?? '–'}</b><span class="grow" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.title || c.channel)}<br><span class="sub">${esc(c.channel)}, ${when(c.created)}</span></span></button>`).join('')}</div>`;
+
+function vRating() {
+  const list = pick(false), c = clip(sel);
+  if (!c) return '<h1>Ocena</h1><p class="lead">Gdy powstanie pierwszy klip, zobaczysz tu jego punktację i listę rzeczy do poprawy.</p>';
+  const sc = c.score || {total: 0, parts: [], tips: []}, col = sc.total >= 75 ? 'var(--mint)' : sc.total >= 50 ? 'var(--cyan)' : 'var(--hot)', ai = c.ai;
+  return `<h1>Ocena</h1><p class="lead">Punktacja liczona lokalnie z czatu, dźwięku i napisów. Ocena AI czyta transkrypcję i statystyki klipu.</p>
+  <div class="split">${clipList(list, 'rating')}<div>
+    <div class="card"><div class="row wrap" style="gap:20px;align-items:flex-start">
+      <div class="ring" style="background:conic-gradient(${col} ${sc.total * 3.6}deg,var(--fill) 0)"><span class="num">${sc.total}</span></div>
+      <div class="grow" style="min-width:240px"><div class="name">${esc(c.title || c.channel)}</div><div class="sub" style="margin-bottom:10px">${esc(c.channel)}, ${when(c.created)}, ${c.len || '?'} s, ${esc(c.reason)}</div>
+        ${sc.parts.map(p => `<div class="part"><span>${esc(p.name)}</span><div class="bar"><b style="width:${p.score / p.max * 100}%"></b></div><span class="num sub">${p.score}/${p.max}</span></div>`).join('')}</div>
+      <video src="${src(c)}#t=0.5" controls preload="metadata" style="width:150px;aspect-ratio:9/16;background:#000"></video></div>
+      <h2>Co poprawić</h2>${sc.tips.length ? `<ul class="tips">${sc.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : '<p class="sub">Nic do poprawy według lokalnych reguł.</p>'}
+      <div class="row" style="margin-top:10px">${c.src ? `<button class="b" onclick="go('editor','${c.id}')">Otwórz w edytorze</button>` : ''}</div></div>
+    <div class="card" style="margin-top:14px"><div class="row"><div class="name grow">Ocena AI</div>
+      <button class="b go" ${aiBusy ? 'disabled' : ''} onclick="askAI('${c.id}')">${aiBusy ? 'Oceniam…' : ai ? 'Oceń ponownie' : 'Oceń przez AI'}</button></div>
+      ${ai ? `<p style="margin:10px 0"><b class="num ${cls(ai.score)}" style="font-size:24px">${esc(ai.score)}</b> / 100. ${esc(ai.verdict)}</p>
+        <ul class="tips">${(ai.tips || []).map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+        ${ai.title ? `<div class="row wrap" style="margin-top:10px"><span class="grow">Propozycja: <b>${esc(ai.title)}</b><br><span class="sub">${esc(ai.hashtags || '')}</span></span>
+          <button class="b" onclick="post('/api/clips/update',{id:'${c.id}',title:clip('${c.id}').ai.title,tags:clip('${c.id}').ai.hashtags||clip('${c.id}').tags}).then(()=>toast('Zastosowano tytuł'))">Użyj tytułu</button></div>` : ''}`
+        : `<p class="sub" style="margin-top:8px">${S.settings.ai_key ? 'Jedno zapytanie na klip, płatne z Twojego klucza API.' : 'Dodaj klucz API w Ustawieniach, żeby włączyć ocenę AI.'}</p>`}</div>
   </div></div>`;
 }
+async function askAI(id) { aiBusy = true; draw(true); const r = await post('/api/clips/ai', {id}); aiBusy = false; sig = ''; draw(true); if (!r.error) toast('Ocena AI gotowa'); }
 
-async function refresh() {
-  try { S = await (await fetch('/api/state')).json(); } catch { $('summary').textContent = 'Brak połączenia z aplikacją'; return; }
-  const live = S.channels.filter(c => c.state === 'live').length;
-  $('summary').textContent = `Kanały: ${S.channels.length} · Na żywo: ${live} · Klipy: ${S.clips.filter(c => c.status === 'ready').length}`;
-  const warn = [];
-  if (!S.deps.ffmpeg) warn.push('Brak FFmpeg – klipy nie powstaną. Zainstaluj: <b>winget install Gyan.FFmpeg</b> i uruchom aplikację ponownie.');
-  if (!S.deps.whisper && S.settings.captions) warn.push('Brak faster-whisper – klipy będą bez napisów. Zainstaluj: <b>pip install faster-whisper</b>.');
-  $('banner').innerHTML = warn.map(w => `<div class="banner">${w}</div>`).join('');
-  $('channels').innerHTML = S.channels.map(c => channelCard(c, S.now)).join('') ||
-    '<div class="empty" style="grid-column:1/-1">Dodaj pierwszy kanał, żeby zacząć.</div>';
-  const sig = S.clips.map(c => c.id + c.status).join();
-  if (sig !== clipSig) { clipSig = sig;
-    $('clips').innerHTML = S.clips.map(clipCard).join('') || '<div class="empty" style="grid-column:1/-1">Klipy pojawią się tutaj, gdy czat na którymś kanale wybuchnie.</div>'; }
-  const log = $('log'), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
-  log.textContent = S.logs.map(l => new Date(l[0] * 1000).toLocaleTimeString('pl-PL') + '  ' + l[1]).join('\n') || 'Brak zdarzeń.';
-  if (atEnd) log.scrollTop = log.scrollHeight;
+function vEditor() {
+  const list = pick(true), c = clip(sel);
+  if (!c) return '<h1>Edytor</h1><p class="lead">Tu przytniesz klip, poprawisz napisy i opis. Najpierw musi powstać klip z zachowanym źródłem.</p>';
+  const w = c.words || [];
+  return `<h1>Edytor</h1><p class="lead">Przesuń początek i koniec, popraw słowa w napisach, a potem wyrenderuj klip ponownie.</p>
+  <div class="split">${clipList(list, 'editor')}<div class="card">
+    <div class="row wrap" style="gap:18px;align-items:flex-start"><video src="${src(c)}#t=0.5" controls preload="metadata" style="width:190px;aspect-ratio:9/16;background:#000"></video>
+    <div class="grow" style="min-width:260px">
+      <label class="sub">Tytuł</label><input id="e_title" style="width:100%;margin:4px 0 12px" value="${esc(c.title)}">
+      <label class="sub">Hashtagi</label><input id="e_tags" style="width:100%;margin:4px 0 12px" value="${esc(c.tags)}">
+      <label class="sub">Początek: <b class="num" id="l_in"></b> s</label><input type="range" id="e_in" min="0" max="${c.raw_dur}" step="0.1" value="${c.t_in}" oninput="trim(this)">
+      <label class="sub">Koniec: <b class="num" id="l_out"></b> s</label><input type="range" id="e_out" min="0" max="${c.raw_dur}" step="0.1" value="${c.t_out}" oninput="trim(this)">
+      <p class="sub" style="margin:6px 0 12px">Źródło ma ${c.raw_dur} s. Długość klipu: <b class="num" id="l_len"></b> s.</p>
+      <div class="row wrap"><button class="b" onclick="saveEdit(false)">Zapisz opis</button><button class="b go" onclick="saveEdit(true)">Renderuj ponownie</button></div></div></div>
+    <h2>Napisy</h2>${w.length ? `<p class="sub" style="margin-bottom:8px">Wyczyść pole, żeby usunąć słowo. Przygaszone słowa są poza przyciętym fragmentem.</p>
+      <div class="words" id="e_words">${w.map((x, i) => `<input data-s="${x[0]}" value="${esc(x[2])}" size="${Math.max(2, x[2].length)}">`).join('')}</div>`
+      : '<p class="sub">Ten klip nie ma transkrypcji.</p>'}</div></div>`;
+}
+function trim(el) {
+  const a = $('e_in'), b = $('e_out'); if (!a) return;
+  if (+b.value - +a.value < 3) { if (el === a) a.value = +b.value - 3; else b.value = +a.value + 3; }
+  $('l_in').textContent = (+a.value).toFixed(1); $('l_out').textContent = (+b.value).toFixed(1); $('l_len').textContent = (b.value - a.value).toFixed(1);
+  document.querySelectorAll('#e_words input').forEach(i => i.classList.toggle('out', +i.dataset.s < +a.value || +i.dataset.s > +b.value));
+}
+async function saveEdit(render) {
+  const body = {id: sel, title: $('e_title').value, tags: $('e_tags').value};
+  if (render) { body.rerender = true; body.t_in = +$('e_in').value; body.t_out = +$('e_out').value;
+    const w = document.querySelectorAll('#e_words input'); if (w.length) body.words = [...w].map(i => i.value); }
+  const r = await post('/api/clips/update', body);
+  if (!r.error) { toast(render ? 'Renderuję klip ponownie' : 'Zapisano opis'); if (render) go('clips'); }
 }
 
-function openSettings() {
-  if (!S) return;
-  $('fields').innerHTML = FIELDS.map(([title, fs]) => `<div class="gl">${title}</div><div class="group">` + fs.map(([k, label, type, opt]) => {
-    const v = S.settings[k];
-    const ctl = type === 'bool' ? `<button type="button" class="switch ${v ? 'on' : ''}" data-k="${k}" onclick="this.classList.toggle('on')"></button>`
-      : type === 'sel' ? `<select data-k="${k}">${opt.map(([val, t]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`
+function vStats() {
+  const r = ready(), scored = r.filter(c => c.score), avg = scored.length ? Math.round(scored.reduce((a, c) => a + c.score.total, 0) / scored.length) : null;
+  const count = f => { const m = {}; r.forEach(c => { const k = f(c); m[k] = (m[k] || 0) + 1; }); return Object.entries(m).sort((a, b) => b[1] - a[1]); };
+  const hb = (rows) => { const max = Math.max(1, ...rows.map(x => x[1])); return rows.map(([k, v]) => `<div class="hbar"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k)}</span><div class="bar"><b style="width:${v / max * 100}%"></b></div><span class="num">${v}</span></div>`).join('') || '<p class="sub">Brak danych.</p>'; };
+  const hours = Array(24).fill(0); r.forEach(c => hours[new Date(c.created * 1000).getHours()]++); const hm = Math.max(1, ...hours);
+  const best = [...scored].sort((a, b) => b.score.total - a.score.total).slice(0, 5);
+  return `<h1>Statystyki</h1><p class="lead">Podsumowanie wszystkich gotowych klipów.</p>
+  <div class="tiles"><div class="card tile"><b>${r.length}</b><span class="sub">gotowych klipów</span></div>
+    <div class="card tile"><b class="${avg == null ? '' : cls(avg)}">${avg ?? '–'}</b><span class="sub">średnia ocena</span></div>
+    <div class="card tile"><b>${S.channels.filter(c => c.state === 'live').length} / ${S.channels.length}</b><span class="sub">kanałów na żywo</span></div>
+    <div class="card tile"><b>${S.disk.clips_mb} MB</b><span class="sub">klipy na dysku, nagrania ${S.disk.rec_mb} MB</span></div></div>
+  <div class="grid big">
+    <div class="card"><h2 style="margin-top:0">Klipy na kanał</h2>${hb(count(c => c.channel))}</div>
+    <div class="card"><h2 style="margin-top:0">Co wywołało klip</h2>${hb(count(c => c.reason))}</div>
+    <div class="card"><h2 style="margin-top:0">Godziny, w których powstają klipy</h2><div class="chart tall">${hours.map(v => `<i style="height:${v / hm * 100}%" title="${v}"></i>`).join('')}</div>
+      <div class="row sub"><span>0:00</span><span class="grow"></span><span>12:00</span><span class="grow"></span><span>23:00</span></div></div>
+    <div class="card"><h2 style="margin-top:0">Najlepsze klipy</h2>${best.map(c => `<div class="row" style="margin:7px 0"><b class="num ${cls(c.score.total)}" style="width:32px">${c.score.total}</b>
+      <button class="link grow" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="go('rating','${c.id}')">${esc(c.title || c.channel)}</button></div>`).join('') || '<p class="sub">Brak ocenionych klipów.</p>'}</div></div>`;
+}
+
+const FONTS = ['Arial', 'Arial Black', 'Impact', 'Bahnschrift', 'Segoe UI', 'Verdana', 'Comic Sans MS'];
+const FIELDS = [
+  ['Wykrywanie', [['auto_clip', 'Automatyczne klipy', 'bool'], ['multiplier', 'Czułość (ile razy więcej niż średnia czatu)', 'num', 0.1], ['min_msgs', 'Minimum wiadomości w oknie', 'num', 1],
+    ['bucket_sec', 'Długość okna (s)', 'num', 1], ['cooldown_sec', 'Przerwa między klipami (s)', 'num', 1],
+    ['keywords', 'Słowa-wyzwalacze (po przecinku, puste = wyłączone)', 'text'], ['keyword_hits', 'Ile wiadomości ze słowem w oknie', 'num', 1]]],
+  ['Klip', [['pre_sec', 'Sekund przed skokiem', 'num', 1], ['post_sec', 'Sekund po skoku', 'num', 1],
+    ['layout', 'Kadr', 'sel', [['blur', 'Cały obraz i rozmyte tło'], ['crop', 'Przycięcie do środka']]],
+    ['quality', 'Jakość nagrywania', 'sel', [['720p60,720p,best', '720p'], ['1080p60,1080p,best', '1080p'], ['best', 'Najlepsza'], ['480p,worst', '480p']]],
+    ['keep_sources', 'Zachowuj źródło klipu (potrzebne w Edytorze)', 'bool'], ['keep_recordings', 'Zachowuj pełne nagrania streamów', 'bool']]],
+  ['Napisy', [['captions', 'Napisy (Whisper)', 'bool'],
+    ['whisper_model', 'Model', 'sel', [['tiny', 'tiny, najszybszy'], ['base', 'base'], ['small', 'small'], ['medium', 'medium'], ['large-v3', 'large-v3, najlepszy']]],
+    ['language', 'Język (puste = wykryj sam)', 'text'], ['cap_font', 'Czcionka', 'sel', FONTS.map(f => [f, f])], ['cap_size', 'Rozmiar', 'num', 1],
+    ['cap_color', 'Kolor tekstu', 'color'], ['cap_highlight', 'Kolor wypowiadanego słowa', 'color'],
+    ['cap_pos', 'Pozycja', 'sel', [['bottom', 'Na dole'], ['middle', 'Na środku'], ['top', 'Na górze']]], ['cap_words', 'Słów na ekranie', 'num', 1], ['cap_upper', 'Wielkie litery', 'bool']]],
+  ['Opis i powiadomienia', [['hashtags', 'Stałe hashtagi', 'text'], ['notify_sound', 'Dźwięk, gdy klip jest gotowy', 'bool'], ['discord_webhook', 'Webhook Discorda (opcjonalnie)', 'text']]],
+  ['Ocena AI', [['ai_key', 'Klucz API Anthropic', 'pass'], ['ai_model', 'Model', 'text']]],
+];
+function vSettings() {
+  return `<div class="row"><h1 class="grow">Ustawienia</h1><button class="b go" onclick="saveSettings()">Zapisz ustawienia</button></div>
+  <p class="lead">Zmiany dotyczą nowych klipów. Styl napisów zadziała też przy ponownym renderze w Edytorze.</p>
+  <div id="fields" class="grid big">${FIELDS.map(([title, fs]) => `<div class="card"><h2 style="margin-top:0">${title}</h2>${fs.map(([k, label, type, opt]) => { const v = S.settings[k];
+    const ctl = type === 'bool' ? `<button type="button" class="sw ${v ? 'on' : ''}" data-k="${k}" aria-label="${label}" onclick="this.classList.toggle('on')"></button>`
+      : type === 'sel' ? `<select data-k="${k}">${opt.map(([a, t]) => `<option value="${a}" ${a === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`
       : type === 'num' ? `<input type="number" min="0" step="${opt}" data-k="${k}" value="${v}">`
-      : `<input type="text" data-k="${k}" value="${esc(v)}">`;
-    return `<label class="field"><span>${label}</span>${ctl}</label>`; }).join('') + '</div>').join('');
-  $('settings').showModal();
+      : type === 'color' ? `<input type="color" data-k="${k}" value="${esc(v)}">`
+      : `<input type="${type === 'pass' ? 'password' : 'text'}" data-k="${k}" value="${esc(v)}" autocomplete="off">`;
+    return `<div class="field"><span>${label}</span>${ctl}</div>`; }).join('')}</div>`).join('')}</div>`;
 }
-function saveSettings() {
-  const out = {};
-  document.querySelectorAll('#fields [data-k]').forEach(el => {
-    out[el.dataset.k] = el.classList.contains('switch') ? el.classList.contains('on') : el.value; });
-  $('settings').close();
-  post('/api/settings', out);
+async function saveSettings() {
+  const out = {}; document.querySelectorAll('#fields [data-k]').forEach(el => { out[el.dataset.k] = el.classList.contains('sw') ? el.classList.contains('on') : el.value; });
+  const r = await post('/api/settings', out); if (!r.error) { toast('Zapisano ustawienia'); draw(true); }
 }
-const settings = $('settings');
-refresh(); setInterval(refresh, 2000);
+
+/* ---------- petla ---------- */
+const RENDER = {channels: vChannels, monitor: vMonitor, clips: vClips, rating: vRating, editor: vEditor, stats: vStats, settings: vSettings};
+const LIVE = {channels: 1, monitor: 1, stats: 1};       // widoki odswiezane co 2 s; pozostale tylko przy zmianie klipow
+function draw(force) {
+  if (!S) return;
+  const s2 = S.clips.map(c => c.id + c.status + (c.rev || 0) + (c.title || '') + (c.ai ? 1 : 0)).join();
+  if (!force && !LIVE[view] && (s2 === sig || view === 'settings' || view === 'editor')) return;
+  if (!force && view === 'channels' && document.activeElement && document.activeElement.name === 'q') return;
+  sig = s2;
+  const log = $('log'), top = log ? log.scrollTop : null;
+  $('view').innerHTML = RENDER[view]();
+  if ($('log')) $('log').scrollTop = top == null ? 1e6 : top;
+  if (view === 'editor') trim();
+}
+async function refresh(force) {
+  try { S = await (await fetch('/api/state')).json(); } catch { return; }
+  const ids = new Set(ready().map(c => c.id));
+  if (known && S.settings.notify_sound && [...ids].some(i => !known.has(i))) { beep(); toast('Nowy klip jest gotowy'); }
+  known = ids; drawNav(); draw(force === true);
+}
+refresh(true); setInterval(refresh, 2000);
+document.addEventListener('pointermove', e => { const c = e.target.closest && e.target.closest('.card'); if (c) { const r = c.getBoundingClientRect();
+  c.style.setProperty('--mx', e.clientX - r.left + 'px'); c.style.setProperty('--my', e.clientY - r.top + 'px'); } });
+
+/* ---------- tlo: pole igiel, ktore obracaja sie i swieca przy kursorze ---------- */
+(() => {
+  const cv = $('bg'), g = cv.getContext('2d'), still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let W, H, cols, rows, mx = -9999, my = -9999, t = 0, ang = [];
+  const GAP = 44;
+  function size() { const d = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * d; cv.height = H * d; g.setTransform(d, 0, 0, d, 0, 0);
+    cols = Math.ceil(W / GAP) + 1; rows = Math.ceil(H / GAP) + 1; ang = new Float32Array(cols * rows); start(); }
+  let raf = 0;
+  function start() { cancelAnimationFrame(raf); frame(); }
+  function frame() {
+    g.clearRect(0, 0, W, H); t += .006;
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+      const px = x * GAP, py = y * GAP, dx = mx - px, dy = my - py, d = Math.hypot(dx, dy), near = Math.max(0, 1 - d / 260), i = y * cols + x;
+      const idle = Math.sin(px * .008 + t) + Math.cos(py * .01 - t * 1.3), target = near > 0 ? Math.atan2(dy, dx) : idle;
+      let diff = target - ang[i]; diff = Math.atan2(Math.sin(diff), Math.cos(diff)); ang[i] += diff * (near > 0 ? .18 : .04);
+      const len = 5 + near * 11, c = Math.cos(ang[i]) * len, s = Math.sin(ang[i]) * len;
+      g.strokeStyle = near > 0 ? `rgba(${88 + near * 167 | 0},${230 - near * 150 | 0},255,${.14 + near * .75})` : 'rgba(143,123,255,.22)';
+      g.lineWidth = 1 + near * 1.4; g.beginPath(); g.moveTo(px - c, py - s); g.lineTo(px + c, py + s); g.stroke();
+    }
+    if (!still && !document.hidden) raf = requestAnimationFrame(frame);
+  }
+  addEventListener('resize', size); addEventListener('pointermove', e => { mx = e.clientX; my = e.clientY; });
+  addEventListener('pointerleave', () => { mx = my = -9999; }); document.addEventListener('visibilitychange', () => { if (!document.hidden && !still) start(); });
+  size();
+})();
 </script>
 </body>
 </html>
