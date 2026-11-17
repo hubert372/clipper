@@ -211,7 +211,8 @@ def ass_color(hex_color, default):
 
 
 CAP_STYLES = {"pop": "Pop", "karaoke": "Karaoke", "box": "Ramka", "word": "Słowo po słowie",
-              "fill": "Wypełnianie", "fade": "Spokojne"}
+              "fill": "Wypełnianie", "fade": "Spokojne", "rainbow": "Tęcza", "neon": "Neon"}
+RAINBOW = ["00E6FF", "FFE658", "9D4DFF", "B0FF7D", "1C9FFF", "FF8DB2"]   # kolory ASS (BGR): zolty, cyjan, roz, mieta, pomarancz, fiolet
 
 
 def build_ass(words, s, dur, title="", censor=(), marked=(), bottom=None):
@@ -274,8 +275,14 @@ def build_ass(words, s, dur, title="", censor=(), marked=(), bottom=None):
                 stop = start + 0.15
             parts = []
             for k, (_, _, t) in enumerate(group):
+                rc = RAINBOW[(i + k) % len(RAINBOW)]
                 if k != j:
-                    parts.append(plain[k])
+                    parts.append("{\\c&H%s&}%s{\\c&H%s&}" % (rc, shown(t), base) if style == "rainbow" else plain[k])
+                elif style == "rainbow":
+                    parts.append("{\\c&H%s&\\fscx126\\fscy126\\t(0,160,\\fscx100\\fscy100)}%s{\\r}" % (rc, shown(t)))
+                elif style == "neon":
+                    parts.append("{\\1c&HFFFFFF&\\3c&H%s&\\bord9\\blur8\\shad0\\fscx116\\fscy116\\t(0,160,\\fscx100\\fscy100)}%s{\\r}"
+                                 % (hi, shown(t)))
                 elif style == "karaoke":
                     parts.append("{\\c&H%s&}%s{\\c&H%s&}" % (hi, shown(t), base))
                 elif style == "box":
@@ -1108,15 +1115,16 @@ class App:
         prev = DATA / "previews"
         prev.mkdir(exist_ok=True)
         name = hashlib.sha1(ass.encode()).hexdigest()[:16]
-        out = prev / (name + ".mp4")
+        out = prev / (name + ".gif")
         if not out.exists():
-            old = sorted(prev.glob("*.mp4"), key=lambda f: f.stat().st_mtime)
+            old = sorted(prev.glob("*.gif"), key=lambda f: f.stat().st_mtime)
             for f in old[:-120]:
                 f.unlink(missing_ok=True)
             (prev / (name + ".ass")).write_text(ass, "utf-8")
             r = run([ff, "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x0b111e:s=360x640:d=3.4:r=30",
-                     "-vf", "subtitles=%s.ass" % name, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-                     "-pix_fmt", "yuv420p", name + ".mp4"], cwd=prev, timeout=60)
+                     "-vf", "subtitles=%s.ass,fps=15,scale=270:480:flags=lanczos,split[a][b];"
+                            "[a]palettegen=max_colors=48[p];[b][p]paletteuse=dither=none" % name,
+                     "-loop", "0", name + ".gif"], cwd=prev, timeout=60)
             (prev / (name + ".ass")).unlink(missing_ok=True)
             if r.returncode or not out.exists():
                 return None

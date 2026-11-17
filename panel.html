@@ -91,7 +91,10 @@ ul.tips{padding-left:18px;margin:6px 0}ul.tips li{margin:5px 0}
 .styles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
 .styles button{all:unset;cursor:pointer;border:2px solid var(--edge);background:#0b111e;display:block}
 .styles button.on{border-color:var(--cyan);box-shadow:0 0 18px rgba(88,230,255,.35)}
-.styles video{display:block;width:100%;aspect-ratio:9/16;background:#0b111e}
+.styles img{display:block;width:100%;aspect-ratio:9/16;background:#0b111e;object-fit:cover}
+.themes{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.themes button{all:unset;cursor:pointer;display:flex;align-items:center;gap:7px;padding:6px 10px;border:1px solid var(--edge);font-size:13px}
+.themes button:hover{background:var(--fill)}.themes i{width:14px;height:14px;border-radius:50%;border:1px solid rgba(255,255,255,.3)}
 .styles span{display:block;padding:7px 9px;font:600 14px var(--head)}
 .toast{position:fixed;right:22px;bottom:22px;z-index:5;background:var(--panel);border:1px solid var(--cyan);padding:10px 16px;opacity:0;transform:translateY(8px);transition:.25s;pointer-events:none}
 .toast.on{opacity:1;transform:none}
@@ -388,6 +391,10 @@ function applyDeps() {
         <button class="b" ${aiTesting ? 'disabled' : ''} onclick="aiTest()">${aiTesting ? 'Sprawdzam…' : 'Sprawdź połączenie'}</button></div>
       <p class="sub" style="margin-top:8px">${mode === 'cli' ? 'Logowanie otwiera oficjalne okno Claude Code i stronę Anthropic. Clipper nie widzi hasła.' : 'Wpisz klucz i sprawdź połączenie.'}</p>`;
 }
+// gotowe zestawy kolorow: [tekst, wypowiadane slowo, slowa kluczowe]
+const THEMES = {'Klasyk': ['#FFFFFF', '#FFE600', '#FF4D9D'], 'Neon': ['#FFFFFF', '#58E6FF', '#FF4D9D'], 'Limonka': ['#FFFFFF', '#B6FF3C', '#58E6FF'],
+  'Ogień': ['#FFF3D6', '#FF7A1A', '#FFE600'], 'Róż': ['#FFFFFF', '#FF4D9D', '#FFE600'], 'Fiolet': ['#FFFFFF', '#B28DFF', '#7DFFB0'], 'Lód': ['#DFF6FF', '#3FA9FF', '#FFFFFF']};
+function setTheme(n) { ['cap_color', 'cap_highlight', 'kw_color'].forEach((k, i) => { document.querySelector(`#fields [data-k=${k}]`).value = THEMES[n][i].toLowerCase(); }); applyDeps(); }
 let styleKey = '', styleTimer = 0;
 function drawStyles(cur) {
   const box = $('styles'); if (!box) return;
@@ -396,7 +403,7 @@ function drawStyles(cur) {
   if (key === styleKey) return; clearTimeout(styleTimer);
   styleTimer = setTimeout(() => { styleKey = key;
     box.innerHTML = Object.entries(S.cap_styles).map(([id, name]) => `<button type="button" class="${id === cur.cap_style ? 'on' : ''}" aria-label="Styl ${esc(name)}" onclick="pickStyle('${id}')">
-      <video src="/api/caption-preview?cap_style=${id}&${q}" autoplay loop muted playsinline></video><span>${esc(name)}</span></button>`).join(''); }, styleKey ? 600 : 0);
+      <img src="/api/caption-preview?cap_style=${id}&${q}" alt="Podgląd stylu ${esc(name)}" loading="lazy"><span>${esc(name)}</span></button>`).join(''); }, styleKey ? 600 : 0);
 }
 function pickStyle(id) { document.querySelector('#fields [data-k=cap_style]').value = id;
   document.querySelectorAll('#styles button').forEach(b => b.classList.toggle('on', b.getAttribute('onclick').includes("'" + id + "'"))); styleKey = styleKey.split('|')[0] + '|' + id; }
@@ -405,6 +412,7 @@ function vSettings() {
   <p class="lead">Zmiany dotyczą nowych klipów. Styl napisów zadziała też przy ponownym renderze w Edytorze.</p>
   <div id="fields" oninput="applyDeps()" onclick="setTimeout(applyDeps)"><div class="card" data-dep="captions" style="margin-bottom:14px"><h2 style="margin-top:0">Styl i animacja napisów</h2>
     <p class="sub" style="margin-bottom:10px">Podglądy pokazują Twoją czcionkę, kolory i pozycję. Kliknij styl, żeby go wybrać.</p>
+    <div class="themes">${Object.entries(THEMES).map(([n, c]) => `<button type="button" onclick="setTheme('${n}')">${c.map(x => `<i style="background:${x}"></i>`).join('')}${n}</button>`).join('')}</div>
     <input type="hidden" data-k="cap_style" value="${esc(S.settings.cap_style)}"><div class="styles" id="styles"></div></div>
   <div class="grid big">${FIELDS.map(([title, fs]) => `<div class="card"><h2 style="margin-top:0">${title}</h2>${fs.map(([k, label, type, opt]) => { const v = S.settings[k];
     const ctl = type === 'bool' ? `<button type="button" class="sw ${v ? 'on' : ''}" data-k="${k}" aria-label="${label}" onclick="this.classList.toggle('on')"></button>`
