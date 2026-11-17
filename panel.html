@@ -88,6 +88,11 @@ ul.tips{padding-left:18px;margin:6px 0}ul.tips li{margin:5px 0}
 .field{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 0;border-top:1px solid rgba(127,141,168,.14)}
 .field:first-of-type{border-top:0}.field input[type=number]{width:90px;text-align:right}.field input[type=text],.field input[type=password]{width:min(300px,50vw)}
 .words{display:flex;flex-wrap:wrap;gap:5px}.words input{width:auto;padding:4px 6px;font-size:13px}.words input.out{opacity:.4}
+.styles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.styles button{all:unset;cursor:pointer;border:2px solid var(--edge);background:#0b111e;display:block}
+.styles button.on{border-color:var(--cyan);box-shadow:0 0 18px rgba(88,230,255,.35)}
+.styles video{display:block;width:100%;aspect-ratio:9/16;background:#0b111e}
+.styles span{display:block;padding:7px 9px;font:600 14px var(--head)}
 .toast{position:fixed;right:22px;bottom:22px;z-index:5;background:var(--panel);border:1px solid var(--cyan);padding:10px 16px;opacity:0;transform:translateY(8px);transition:.25s;pointer-events:none}
 .toast.on{opacity:1;transform:none}
 @media(max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:auto 1fr}nav{flex-direction:row;overflow:auto;padding:8px;border-right:0;border-bottom:1px solid var(--edge)}
@@ -370,6 +375,7 @@ function applyDeps() {
   const cur = collect(), aiopen = !S.ai_status.ok || aiEdit;
   const ok = d => d === 'aiopen' ? aiopen : d.includes('=') ? String(cur[d.split('=')[0]]) === d.split('=')[1] : !!cur[d];
   document.querySelectorAll('#fields [data-dep]').forEach(f => { f.style.display = f.dataset.dep.split(',').every(ok) ? '' : 'none'; });
+  drawStyles(cur);
   const dirty = JSON.stringify(cur) !== snap, b = $('savebtn');
   b.disabled = !dirty; b.textContent = dirty ? 'Zapisz zmiany' : 'Wszystko zapisane';
   const st = S.ai_status, mode = cur.ai_mode, name = S.settings.ai_mode === 'cli' ? 'Claude Code' : 'klucz API';
@@ -382,16 +388,31 @@ function applyDeps() {
         <button class="b" ${aiTesting ? 'disabled' : ''} onclick="aiTest()">${aiTesting ? 'Sprawdzam…' : 'Sprawdź połączenie'}</button></div>
       <p class="sub" style="margin-top:8px">${mode === 'cli' ? 'Logowanie otwiera oficjalne okno Claude Code i stronę Anthropic. Clipper nie widzi hasła.' : 'Wpisz klucz i sprawdź połączenie.'}</p>`;
 }
+let styleKey = '', styleTimer = 0;
+function drawStyles(cur) {
+  const box = $('styles'); if (!box) return;
+  const q = ['cap_font', 'cap_size', 'cap_color', 'cap_highlight', 'cap_pos', 'cap_words', 'cap_upper', 'kw_color'].map(k => k + '=' + encodeURIComponent(cur[k])).join('&');
+  const key = q + '|' + cur.cap_style;
+  if (key === styleKey) return; clearTimeout(styleTimer);
+  styleTimer = setTimeout(() => { styleKey = key;
+    box.innerHTML = Object.entries(S.cap_styles).map(([id, name]) => `<button type="button" class="${id === cur.cap_style ? 'on' : ''}" aria-label="Styl ${esc(name)}" onclick="pickStyle('${id}')">
+      <video src="/api/caption-preview?cap_style=${id}&${q}" autoplay loop muted playsinline></video><span>${esc(name)}</span></button>`).join(''); }, styleKey ? 600 : 0);
+}
+function pickStyle(id) { document.querySelector('#fields [data-k=cap_style]').value = id;
+  document.querySelectorAll('#styles button').forEach(b => b.classList.toggle('on', b.getAttribute('onclick').includes("'" + id + "'"))); styleKey = styleKey.split('|')[0] + '|' + id; }
 function vSettings() {
   return `<div class="row"><h1 class="grow">Ustawienia</h1><button class="b go" id="savebtn" disabled onclick="saveSettings()">Wszystko zapisane</button></div>
   <p class="lead">Zmiany dotyczą nowych klipów. Styl napisów zadziała też przy ponownym renderze w Edytorze.</p>
-  <div id="fields" class="grid big" oninput="applyDeps()" onclick="setTimeout(applyDeps)">${FIELDS.map(([title, fs]) => `<div class="card"><h2 style="margin-top:0">${title}</h2>${fs.map(([k, label, type, opt]) => { const v = S.settings[k];
+  <div id="fields" oninput="applyDeps()" onclick="setTimeout(applyDeps)"><div class="card" data-dep="captions" style="margin-bottom:14px"><h2 style="margin-top:0">Styl i animacja napisów</h2>
+    <p class="sub" style="margin-bottom:10px">Podglądy pokazują Twoją czcionkę, kolory i pozycję. Kliknij styl, żeby go wybrać.</p>
+    <input type="hidden" data-k="cap_style" value="${esc(S.settings.cap_style)}"><div class="styles" id="styles"></div></div>
+  <div class="grid big">${FIELDS.map(([title, fs]) => `<div class="card"><h2 style="margin-top:0">${title}</h2>${fs.map(([k, label, type, opt]) => { const v = S.settings[k];
     const ctl = type === 'bool' ? `<button type="button" class="sw ${v ? 'on' : ''}" data-k="${k}" aria-label="${label}" onclick="this.classList.toggle('on')"></button>`
       : type === 'sel' ? `<select data-k="${k}">${opt.map(([a, t]) => `<option value="${a}" ${a === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`
       : type === 'num' ? `<input type="number" min="0" step="${opt}" data-k="${k}" value="${v}">`
       : type === 'color' ? `<input type="color" data-k="${k}" value="${esc(v)}">`
       : `<input type="${type === 'pass' ? 'password' : 'text'}" data-k="${k}" value="${esc(v)}" autocomplete="off">`;
-    return `<div class="field" ${DEP[k] ? `data-dep="${DEP[k]}"` : ''}><span>${label}</span>${ctl}</div>`; }).join('')}${title.startsWith('AI') ? '<div id="aibox"></div>' : ''}</div>`).join('')}</div>`;
+    return `<div class="field" ${DEP[k] ? `data-dep="${DEP[k]}"` : ''}><span>${label}</span>${ctl}</div>`; }).join('')}${title.startsWith('AI') ? '<div id="aibox"></div>' : ''}</div>`).join('')}</div></div>`;
 }
 async function saveSettings(quiet) {
   const r = await post('/api/settings', collect()); if (!r.error) { aiEdit = false; if (!quiet) toast('Zapisano ustawienia'); draw(true); } return r;
@@ -415,7 +436,7 @@ function draw(force) {
   const log = $('log'), top = log ? log.scrollTop : null;
   $('view').innerHTML = (S.paused ? `<div class="card warn row" style="border-color:var(--violet);color:var(--text)"><span class="grow">Clipper jest wstrzymany. Kanały nie są nagrywane i klipy nie powstają.</span>
     <button class="b go" onclick="post('/api/pause',{paused:false})">Start</button></div>` : '') + RENDER[view]();
-  if (view === 'settings') { snap = JSON.stringify(collect()); applyDeps(); }
+  if (view === 'settings') { styleKey = ''; snap = JSON.stringify(collect()); applyDeps(); }
   if ($('log')) $('log').scrollTop = top == null ? 1e6 : top;
   if (view === 'editor') trim();
 }

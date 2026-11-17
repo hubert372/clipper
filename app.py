@@ -4,6 +4,7 @@ Uruchom:  python app.py   (panel otworzy sie pod http://127.0.0.1:8765)
 Wymaga:   Python 3.10+, ffmpeg w PATH, pip install -r requirements.txt
 """
 import base64
+import hashlib
 import json
 import mimetypes
 import os
@@ -17,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 import uuid
 import zipfile
@@ -55,6 +57,7 @@ DEFAULTS = {
     "keyword_hits": 8,       # ile wiadomosci ze slowem-wyzwalaczem w oknie robi klip
     "cap_font": "Arial", "cap_size": 92, "cap_color": "#FFFFFF", "cap_highlight": "#FFE600",
     "cap_pos": "bottom", "cap_words": 3, "cap_upper": True,
+    "cap_style": "pop",       # animacja napisow, patrz CAP_STYLES
     "hashtags": "#twitch #clips #fyp",
     "notify_sound": True, "discord_webhook": "",
     "ai_key": "", "ai_model": "claude-haiku-5-5",
@@ -207,6 +210,10 @@ def ass_color(hex_color, default):
     return "%s%s%s" % (m.group(3), m.group(2), m.group(1))
 
 
+CAP_STYLES = {"pop": "Pop", "karaoke": "Karaoke", "box": "Ramka", "word": "Słowo po słowie",
+              "fill": "Wypełnianie", "fade": "Spokojne"}
+
+
 def build_ass(words, s, dur, title="", censor=(), marked=(), bottom=None):
     """Napisy ASS. words = [(start, end, tekst)] w czasie klipu; title = naglowek na gorze."""
     if not words and not title:
@@ -232,22 +239,52 @@ def build_ass(words, s, dur, title="", censor=(), marked=(), bottom=None):
     lines = []
     if title:
         lines.append("Dialogue: 1,%s,%s,Head,,0,0,0,,%s" % (ass_time(0), ass_time(dur), clean(title)))
-    n = max(1, min(8, int(s["cap_words"])))
+    style = s.get("cap_style") if s.get("cap_style") in CAP_STYLES else "pop"
+    n = 1 if style == "word" else max(1, min(8, int(s["cap_words"])))
+    # punkt zaczepienia napisow (dla animacji z ruchem)
+    ax, ay = 540, (margin if align == 8 else 960 if align == 5 else 1920 - margin)
+    r, g, b = int(hi[4:6], 16), int(hi[2:4], 16), int(hi[0:2], 16)
+    on_hi = "000000" if (r * 299 + g * 587 + b * 114) / 1000 > 140 else "FFFFFF"   # czytelny tekst na ramce
+
+    def shown(txt):
+        if hits(txt, censor):
+            txt = txt[:1] + "*" * max(1, len(txt) - 1)
+        return clean(txt.upper() if s["cap_upper"] else txt)
+
     for i in range(0, len(words), n):
         group = words[i:i + n]
+        g_end = min(group[-1][1] + 0.6, words[i + n][0]) if i + n < len(words) else group[-1][1] + 0.5
+        plain = [("{\\c&H%s&}%s{\\c&H%s&}" % (kw, shown(t), base)) if hits(t, marked) else shown(t)
+                 for _, _, t in group]
+        if style in ("fill", "fade"):
+            g0 = group[0][0]
+            if style == "fade":
+                text = "{\\fad(160,120)}" + " ".join(plain)
+            else:   # slowa wypelniaja sie kolorem w rytm mowy, caly wiersz wjezdza od dolu
+                ks = [int(round(((group[k + 1][0] if k + 1 < len(group) else group[k][1]) - group[k][0]) * 100))
+                      for k in range(len(group))]
+                text = "{\\an%d\\move(%d,%d,%d,%d,0,160)\\fad(120,80)\\1c&H%s&\\2c&H%s&}" % (
+                    align, ax, ay + 50, ax, ay, hi, base) + " ".join(
+                    "{\\k%d}%s" % (max(1, k), shown(t)) for k, (_, _, t) in zip(ks, group))
+            lines.append("Dialogue: 0,%s,%s,Cap,,0,0,0,,%s" % (ass_time(g0), ass_time(max(g_end, g0 + 0.2)), text))
+            continue
         for j, (start, end, _) in enumerate(group):
-            stop = group[j + 1][0] if j + 1 < len(group) else min(end + 0.25, group[-1][1] + 0.6)
-            if i + n < len(words) and j + 1 == len(group):
-                stop = min(stop, words[i + n][0])
+            stop = group[j + 1][0] if j + 1 < len(group) else g_end
             if stop <= start:
                 stop = start + 0.15
             parts = []
-            for k, (_, _, txt) in enumerate(group):
-                color = hi if k == j else kw if hits(txt, marked) else base
-                if hits(txt, censor):
-                    txt = txt[:1] + "*" * max(1, len(txt) - 1)
-                txt = clean(txt.upper() if s["cap_upper"] else txt)
-                parts.append(txt if color == base else "{\\c&H%s&}%s{\\c&H%s&}" % (color, txt, base))
+            for k, (_, _, t) in enumerate(group):
+                if k != j:
+                    parts.append(plain[k])
+                elif style == "karaoke":
+                    parts.append("{\\c&H%s&}%s{\\c&H%s&}" % (hi, shown(t), base))
+                elif style == "box":
+                    parts.append("{\\1c&H%s&\\3c&H%s&\\bord12\\shad0}%s{\\r}" % (on_hi, hi, shown(t)))
+                elif style == "word":
+                    parts.append("{\\fs%d\\c&H%s&\\fscx60\\fscy60\\t(0,110,\\fscx112\\fscy112)\\t(110,190,\\fscx100\\fscy100)}%s"
+                                 % (int(size * 1.35), kw if hits(t, marked) else hi if (i // n) % 3 == 2 else base, shown(t)))
+                else:   # pop
+                    parts.append("{\\c&H%s&\\fscx124\\fscy124\\t(0,160,\\fscx100\\fscy100)}%s{\\r}" % (hi, shown(t)))
             lines.append("Dialogue: 0,%s,%s,Cap,,0,0,0,,%s" % (ass_time(start), ass_time(stop), " ".join(parts)))
     return head + "\n".join(lines) + "\n"
 
@@ -1050,6 +1087,41 @@ class App:
             (CLIPS / raw).unlink(missing_ok=True)
             clip["src"] = False
 
+    def caption_preview(self, q):
+        """Krotki film z podgladem animacji napisow dla podanych ustawien (z pamiecia podreczna)."""
+        ff = which("ffmpeg")
+        if not ff:
+            return None
+        s = dict(self.settings, layout="crop")
+        for key, cast in (("cap_style", str), ("cap_font", str), ("cap_color", str), ("cap_highlight", str),
+                          ("cap_pos", str), ("kw_color", str), ("cap_size", int), ("cap_words", int)):
+            if key in q:
+                try:
+                    s[key] = cast(q[key][0])[:40] if cast is str else cast(float(q[key][0]))
+                except (TypeError, ValueError):
+                    pass
+        if "cap_upper" in q:
+            s["cap_upper"] = q["cap_upper"][0] == "true"
+        sample = [(0.25, 0.55, "No"), (0.55, 0.8, "i"), (0.8, 1.3, "patrzcie"), (1.45, 1.75, "co"), (1.75, 2.0, "tu"),
+                  (2.0, 2.6, "wypadło")]
+        ass = build_ass(sample, s, 3.4, marked=["wypad"])
+        prev = DATA / "previews"
+        prev.mkdir(exist_ok=True)
+        name = hashlib.sha1(ass.encode()).hexdigest()[:16]
+        out = prev / (name + ".mp4")
+        if not out.exists():
+            old = sorted(prev.glob("*.mp4"), key=lambda f: f.stat().st_mtime)
+            for f in old[:-120]:
+                f.unlink(missing_ok=True)
+            (prev / (name + ".ass")).write_text(ass, "utf-8")
+            r = run([ff, "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x0b111e:s=360x640:d=3.4:r=30",
+                     "-vf", "subtitles=%s.ass" % name, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                     "-pix_fmt", "yuv420p", name + ".mp4"], cwd=prev, timeout=60)
+            (prev / (name + ".ass")).unlink(missing_ok=True)
+            if r.returncode or not out.exists():
+                return None
+        return out
+
     def export_zip(self):
         """Paczka ZIP z zatwierdzonymi klipami i plikiem z opisami."""
         with self.lock:
@@ -1097,6 +1169,7 @@ class App:
                 "settings": {**self.settings, "ai_key": MASK if self.settings["ai_key"] else ""},
                 "disk": self.disk(),
                 "paused": self.paused,
+                "cap_styles": CAP_STYLES,
                 "ai_status": AI_STATUS,
                 "queue": sum(1 for c in self.clips if c["status"] in ("pending", "processing")),
                 "logs": list(self.logs)[-40:],
@@ -1249,6 +1322,8 @@ class App:
                         self.settings[k] = bool(v) if isinstance(d, bool) else type(d)(v)
                     except (TypeError, ValueError):
                         pass
+            if self.settings["cap_style"] not in CAP_STYLES:
+                self.settings["cap_style"] = "pop"
             if self.settings["ai_mode"] not in ("api", "cli"):
                 self.settings["ai_mode"] = "api"
             self.settings["auto_delete_below"] = max(0, min(100, self.settings["auto_delete_below"]))
@@ -1285,6 +1360,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, (BASE / "panel.html").read_bytes(), "text/html; charset=utf-8")
         if path == "/api/state":
             return self._send(200, self.app.state())
+        if path == "/api/caption-preview":
+            f = self.app.caption_preview(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query))
+            return self._file(f) if f else self._send(404, {"error": "brak podglądu"})
         if path == "/api/export.zip":
             z = self.app.export_zip()
             if not z:
