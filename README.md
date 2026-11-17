@@ -13,7 +13,7 @@ irm https://raw.githubusercontent.com/hubert372/clipper/main/install.ps1 | iex
 
 Komenda instaluje Git, Pythona 3.12 i FFmpeg (jeśli ich nie ma), pobiera aplikację do
 `%USERPROFILE%\clipper`, instaluje Streamlink i faster-whisper, tworzy skrót „Clipper”
-na pulpicie i uruchamia panel pod adresem http://127.0.0.1:8765.
+na pulpicie i uruchamia aplikację we własnym oknie.
 
 ## Codzienne użycie
 
@@ -21,7 +21,8 @@ Uruchamiaj skrótem „Clipper” (czyli `start.bat`). Przy każdym starcie apli
 pobiera najnowszą wersję z GitHuba. Kanały, ustawienia i klipy są w folderze `data`,
 którego aktualizacje nie ruszają.
 
-Okno konsoli musi pozostać otwarte. Zamknięcie okna zatrzymuje aplikację.
+Zamknięcie okna Clippera zatrzymuje nagrywanie i aplikację. Dziennik zapisuje się też
+w `data/clipper.log`. Panel w przeglądarce zamiast okna: `python app.py --browser`.
 
 ## Jak to działa
 

@@ -6,7 +6,8 @@ where ffmpeg >nul 2>nul || (echo Brak FFmpeg. Zainstaluj: winget install Gyan.FF
 if not exist .venv python -m venv .venv
 fc /b requirements.txt .venv\req.txt >nul 2>nul && goto app
 echo Instaluje zaleznosci...
-.venv\Scripts\python -m pip install -q -r requirements.txt && copy /y requirements.txt .venv\req.txt >nul
+.venv\Scripts\python -m pip install -q -r requirements.txt || (echo Instalacja zaleznosci nie powiodla sie. & pause & exit /b)
+.venv\Scripts\python -m pip install -q pywebview || echo Okno aplikacji niedostepne - panel otworzy sie w przegladarce.
+copy /y requirements.txt .venv\req.txt >nul
 :app
-.venv\Scripts\python app.py
-pause
+start "" .venv\Scripts\pythonw.exe app.py

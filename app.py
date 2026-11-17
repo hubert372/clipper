@@ -342,7 +342,13 @@ class App:
 
     def log(self, msg):
         self.logs.append([time.time(), msg])
-        print(time.strftime("%H:%M:%S"), msg, flush=True)
+        line = time.strftime("%H:%M:%S") + " " + msg
+        print(line, flush=True)
+        try:
+            with open(DATA / "clipper.log", "a", encoding="utf-8") as fh:
+                fh.write(time.strftime("%Y-%m-%d ") + line + "\n")
+        except OSError:
+            pass
 
     def save(self):
         with self.lock:
@@ -470,6 +476,11 @@ class App:
                         self.clips.remove(c)
                         if c.get("file"):
                             (CLIPS / c["file"]).unlink(missing_ok=True)
+        elif path == "/api/open-folder":
+            if os.name == "nt":
+                os.startfile(str(CLIPS))
+            else:
+                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(CLIPS)])
         elif path == "/api/settings":
             for k, v in body.items():
                 if k in DEFAULTS:
@@ -562,9 +573,63 @@ class Handler(BaseHTTPRequestHandler):
         self._send(400 if "error" in res else 200, res)
 
 
+def set_window_icon(title, ico):
+    """Windows: podmienia ikone okna i paska zadan na ikone Clippera."""
+    import ctypes
+    u = ctypes.windll.user32
+    u.FindWindowW.restype = ctypes.c_void_p
+    u.LoadImageW.restype = ctypes.c_void_p
+    u.LoadImageW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+    u.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+    hwnd = u.FindWindowW(None, title)
+    if not hwnd:
+        return
+    for size, kind in ((48, 1), (16, 0)):                    # ICON_BIG, ICON_SMALL
+        h = u.LoadImageW(None, str(ico), 1, size, size, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
+        if h:
+            u.SendMessageW(hwnd, 0x80, kind, h)              # WM_SETICON
+
+
+def open_window(url):
+    """Otwiera panel we wlasnym oknie. Zwraca False, gdy pywebview nie jest dostepne."""
+    try:
+        import webview
+    except Exception:
+        return False
+    ico = BASE / "clipper.ico"
+    if os.name == "nt":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("hubert372.clipper")
+        except Exception:
+            pass
+    try:
+        webview.settings["ALLOW_DOWNLOADS"] = True
+    except Exception:
+        pass
+    win = webview.create_window("Clipper", url, width=1180, height=880, min_size=(420, 600))
+    if os.name == "nt" and ico.exists():
+        def on_shown():
+            try:
+                set_window_icon("Clipper", ico)
+            except Exception:
+                pass
+        win.events.shown += on_shown
+    webview.start()      # blokuje do zamkniecia okna
+    return True
+
+
 def main():
     app = App()
     Handler.app = app
+    url = "http://%s:%d" % (HOST, PORT)
+    try:
+        srv = ThreadingHTTPServer((HOST, PORT), Handler)
+    except OSError:
+        # aplikacja juz dziala - pokaz tylko jej okno
+        if not open_window(url):
+            webbrowser.open(url)
+        return
     try:
         import streamlink  # noqa: F401
     except Exception:
@@ -572,13 +637,14 @@ def main():
     if not which("ffmpeg"):
         app.log("UWAGA: brak ffmpeg - zainstaluj: winget install Gyan.FFmpeg")
     app.start()
-    srv = ThreadingHTTPServer((HOST, PORT), Handler)
-    url = "http://%s:%d" % (HOST, PORT)
     app.log("Panel: " + url)
-    if "--no-browser" not in sys.argv:
-        threading.Timer(1, lambda: webbrowser.open(url)).start()
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
-        srv.serve_forever()
+        if "--browser" in sys.argv or not open_window(url):
+            if "--no-browser" not in sys.argv:
+                webbrowser.open(url)
+            while True:
+                time.sleep(3600)
     except KeyboardInterrupt:
         pass
     finally:
@@ -589,4 +655,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+        DATA.mkdir(parents=True, exist_ok=True)
+        with open(DATA / "clipper.log", "a", encoding="utf-8") as fh:
+            fh.write(traceback.format_exc())
+        raise
