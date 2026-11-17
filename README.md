@@ -48,6 +48,18 @@ w `data/clipper.log`. Panel w przeglądarce zamiast okna: `python app.py --brows
 - **Ustawienia** – wykrywanie, słowa-wyzwalacze, styl napisów, powiadomienia (dźwięk,
   webhook Discorda), klucz AI.
 
+## Montaż pod TikToka, Reels i Shorts
+
+- **Haczyk** (opcja kanału, domyślnie włączona): klip ma ok. 18 s i zaczyna się kilka sekund
+  przed reakcją czatu. Długość i wyprzedzenie ustawiasz w Ustawieniach.
+- **Najpierw puenta, auto-zoom, emotka z czatu, efekty dźwiękowe**: włączane w Opcjach kanału.
+- **Strefy bezpieczne**: napisy, tytuł, logo i pasek postępu są trzymane poza obszarami, które
+  zasłania interfejs aplikacji. Podgląd z nakładką jest w oknie klipu.
+- **Edytor**: tryb wycinania słów (znika też obraz i dźwięk), eksport 16:9, 1:1 i SRT.
+- **Klipy**: „Montaż z zatwierdzonych” składa do 8 najlepszych klipów w jeden film.
+- **Publikacja**: opisy osobno na Shorts, TikToka i Reels, plan, odhaczanie i wyświetlenia;
+  wyniki widać w Statystykach.
+
 ## Start, pauza i opcje kanału
 
 - Przycisk **Pauza / Start** w lewym panelu wstrzymuje i wznawia nagrywanie wszystkich

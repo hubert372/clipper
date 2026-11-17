@@ -103,6 +103,14 @@ video:fullscreen{object-fit:contain!important;aspect-ratio:auto!important;backgr
 .viewer{display:grid;grid-template-columns:minmax(0,340px) 1fr;gap:20px;align-items:start}
 .viewer video{width:100%;max-height:80vh;aspect-ratio:9/16;background:#000;object-fit:contain}
 @media(max-width:760px){.viewer{grid-template-columns:1fr}.viewer video{max-height:56vh}}
+.words input.cutw{text-decoration:line-through;color:var(--hot);border-color:var(--hot)}
+.vwrap{position:relative}.ui{position:absolute;inset:0;pointer-events:none}
+.ui div{position:absolute;background:rgba(255,77,157,.38);border:1px dashed var(--hot);font-size:11px;color:#fff;display:grid;place-items:center}
+.pubrow{display:grid;grid-template-columns:70px 1fr auto;gap:10px;align-items:start;padding:10px 0;border-top:1px solid rgba(127,141,168,.14)}
+.pubrow textarea{width:100%;min-height:62px;resize:vertical;font-size:13px}
+.pubrow .ctl{display:flex;flex-direction:column;gap:6px;align-items:flex-end;font-size:12px;color:var(--sub)}
+.pubrow input[type=number]{width:96px;text-align:right}
+@media(max-width:760px){.pubrow{grid-template-columns:1fr}.pubrow .ctl{align-items:flex-start}}
 .toast{position:fixed;right:22px;bottom:22px;z-index:5;background:var(--panel);border:1px solid var(--cyan);padding:10px 16px;opacity:0;transform:translateY(8px);transition:.25s;pointer-events:none}
 .toast.on{opacity:1;transform:none}
 @media(max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:auto 1fr}nav{flex-direction:row;overflow:auto;padding:8px;border-right:0;border-bottom:1px solid var(--edge)}
@@ -124,8 +132,8 @@ video:fullscreen{object-fit:contain!important;aspect-ratio:auto!important;backgr
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let saved = ''; try { saved = localStorage.getItem('clipper_view') || ''; } catch {}
-let S = null, view = ['monitor','clips','rating','editor','stats','settings'].find(v => v === (location.hash.slice(1) || saved)) || 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'new', rev: ''}, aiBusy = false, addAI = false;
-const VIEWS = [['channels', 'Kanały'], ['monitor', 'Monitor'], ['clips', 'Klipy'], ['rating', 'Ocena'], ['editor', 'Edytor'], ['stats', 'Statystyki'], ['settings', 'Ustawienia']];
+let S = null, view = ['monitor','clips','rating','editor','publish','stats','settings'].find(v => v === (location.hash.slice(1) || saved)) || 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'new', rev: ''}, aiBusy = false, addAI = false;
+const VIEWS = [['channels', 'Kanały'], ['monitor', 'Monitor'], ['clips', 'Klipy'], ['rating', 'Ocena'], ['editor', 'Edytor'], ['publish', 'Publikacja'], ['stats', 'Statystyki'], ['settings', 'Ustawienia']];
 
 async function post(path, body, quiet) {
   let j = {};
@@ -203,7 +211,8 @@ function vChannels() {
   <h2>Dziennik</h2><div class="card log" id="log">${esc(S.logs.map(l => new Date(l[0] * 1000).toLocaleTimeString('pl-PL') + '  ' + l[1]).join('\n') || 'Brak zdarzeń.')}</div>`;
 }
 
-const CH_FIELDS = [['facecam', 'Układ z kamerką (kamerka u góry, gra na dole)'], ['title_bar', 'Nagłówek z tytułem klipu'], ['progress', 'Pasek postępu'],
+const CH_FIELDS = [['hook', 'Haczyk: krótki klip zaczynający się tuż przed akcją'], ['payoff_first', 'Najpierw puenta (2 s zapowiedzi na początku)'], ['auto_zoom', 'Auto-zoom w szczytowym momencie'],
+  ['sticker', 'Emotka z czatu jako naklejka'], ['sfx', 'Efekty dźwiękowe (start i szczyt)'], ['facecam', 'Układ z kamerką (kamerka u góry, gra na dole)'], ['title_bar', 'Nagłówek z tytułem klipu'], ['progress', 'Pasek postępu'],
   ['logo', 'Logo / znak wodny'], ['censor', 'Cenzura przekleństw'], ['cut_silence', 'Wycinanie ciszy'], ['highlight', 'Wyróżnianie słów kluczowych'],
   ['loudnorm', 'Wyrównanie głośności'], ['ai_cut', 'AI wybiera najlepszy fragment i tytuł (1 zapytanie na klip)'], ['audio_trigger', 'Klip także przy skoku głośności']];
 const CAMS = {'Lewy dół': [2, 68, 26, 30], 'Prawy dół': [72, 68, 26, 30], 'Lewy górny': [2, 2, 26, 30], 'Prawy górny': [72, 2, 26, 30]};
@@ -259,10 +268,15 @@ function clipCard(c) {
       <button class="link" onclick="copyDesc('${c.id}')">Kopiuj opis</button>` : ''}
       ${c.status === 'ready' || c.status === 'error' ? `<button class="link bad" onclick="if(confirm('Usunąć ten klip?'))post('/api/clips/delete',{id:'${c.id}'})">Usuń</button>` : ''}</div></div></div>`;
 }
-let viewId = null;
+let viewId = null, uiMode = '';
+// przyblizone obszary zasloniete przez interfejs aplikacji: [gora, dol, prawa kolumna] w % kadru
+const UI_ZONES = {tiktok: [8, 19.3, 11], reels: [7.8, 15.6, 8], shorts: [7.8, 17.7, 17.6]};
+function setUI(m) { uiMode = m; const o = $('uiov'); if (!o) return; const z = UI_ZONES[m];
+  o.innerHTML = z ? `<div style="left:0;right:0;top:0;height:${z[0]}%">góra aplikacji</div><div style="left:0;right:0;bottom:0;height:${z[1]}%">opis i dźwięk</div>
+    <div style="right:0;width:${z[2]}%;top:45%;bottom:${z[1]}%">przyciski</div>` : ''; }
 function openClip(id) {
   const c = clip(id); if (!c || c.status !== 'ready') return; viewId = id;
-  const d = $('clipdlg'); d.innerHTML = `<div class="viewer"><video src="${src(c)}" controls autoplay playsinline></video><div id="clipside"></div></div>`;
+  const d = $('clipdlg'); d.innerHTML = `<div class="viewer"><div class="vwrap"><video src="${src(c)}" controls autoplay playsinline></video><div class="ui" id="uiov"></div></div><div id="clipside"></div></div>`; setUI(uiMode);
   d.onclose = () => { d.innerHTML = ''; viewId = null; }; drawSide(); d.showModal();
 }
 function drawSide() {
@@ -272,10 +286,11 @@ function drawSide() {
   box.innerHTML = `<div class="row"><div class="name grow">${esc(c.title || c.channel)}</div><button class="link" onclick="${shut}">Zamknij</button></div>
     <div class="sub" style="margin:4px 0 10px">${esc(c.channel)}, ${when(c.created)}, ${c.len || '?'} s, ${esc(c.reason)}</div>
     <span class="tag ${c.review === 'ok' ? 'ok' : ''}">${c.review === 'ok' ? 'zatwierdzony' : 'do przejrzenia'}</span>
-    <div class="row" style="margin:14px 0 6px"><b class="num ${cls(sc.total)}" style="font-size:34px">${sc.total}</b><span class="sub">ocena na 100</span></div>
+    ${c.score ? `<div class="row" style="margin:14px 0 6px"><b class="num ${cls(sc.total)}" style="font-size:34px">${sc.total}</b><span class="sub">ocena na 100</span></div>` : ''}
     ${sc.parts.map(p => `<div class="part"><span>${esc(p.name)}</span><div class="bar"><b style="width:${p.score / p.max * 100}%"></b></div><span class="num sub">${p.score}/${p.max}</span></div>`).join('')}
     ${sc.tips.length ? `<h2>Co poprawić</h2><ul class="tips">${sc.tips.slice(0, 4).map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
     <p class="sub" style="margin:10px 0">${esc(c.tags || '')}</p>
+    <div class="row sub" style="margin-bottom:10px">Podgląd interfejsu: <select onchange="setUI(this.value)">${[['', 'Brak'], ['tiktok', 'TikTok'], ['reels', 'Reels'], ['shorts', 'Shorts']].map(([k, t]) => `<option value="${k}" ${k === uiMode ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
     ${c.review !== 'ok' ? `<div class="row" style="margin-bottom:10px"><button class="b go grow" onclick="post('/api/clips/review',{id:'${c.id}',ok:true})">Zatwierdź</button>
       <button class="b bad grow" onclick="${shut}post('/api/clips/review',{id:'${c.id}',ok:false})">Odrzuć</button></div>` : ''}
     <div class="row wrap"><button class="b" onclick="${shut}go('rating','${c.id}')">Pełna ocena i AI</button>
@@ -292,6 +307,7 @@ function vClips() {
     <select onchange="filt.ch=this.value;sig='';draw(true)"><option value="">Wszystkie kanały</option>${chans.map(n => `<option ${n === filt.ch ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
     <select onchange="filt.rev=this.value;sig='';draw(true)"><option value="">Wszystkie</option><option value="new" ${filt.rev === 'new' ? 'selected' : ''}>Do przejrzenia</option><option value="ok" ${filt.rev === 'ok' ? 'selected' : ''}>Zatwierdzone</option></select>
     <select onchange="filt.sort=this.value;sig='';draw(true)"><option value="new">Najnowsze</option><option value="score" ${filt.sort === 'score' ? 'selected' : ''}>Najwyżej ocenione</option></select>
+    ${ready().filter(c => c.review === 'ok' && c.kind !== 'montage').length > 1 ? `<button class="b" id="mbtn" onclick="this.disabled=true;this.textContent='Składam montaż…';post('/api/montage',{}).then(r=>{if(!r.error)toast('Montaż gotowy')})">Montaż z zatwierdzonych</button>` : ''}
     ${ready().some(c => c.review === 'ok') ? `<button class="b" onclick="zip()">Pobierz zatwierdzone (ZIP)</button>` : ''}
     <button class="b" onclick="post('/api/open-folder',{})">Otwórz folder</button></div>
   <div class="clips" style="margin-top:16px">${list.map(clipCard).join('') || '<div class="empty">Klipy pojawią się tutaj, gdy czat na którymś kanale wybuchnie.</div>'}</div>`;
@@ -347,11 +363,43 @@ function vEditor() {
       <label class="sub">Początek: <b class="num" id="l_in"></b> s</label><input type="range" id="e_in" min="0" max="${c.raw_dur}" step="0.1" value="${c.t_in}" oninput="trim(this)">
       <label class="sub">Koniec: <b class="num" id="l_out"></b> s</label><input type="range" id="e_out" min="0" max="${c.raw_dur}" step="0.1" value="${c.t_out}" oninput="trim(this)">
       <p class="sub" style="margin:6px 0 12px">Źródło ma ${c.raw_dur} s. Długość klipu: <b class="num" id="l_len"></b> s.</p>
-      <div class="row wrap"><button class="b" id="e_save" disabled onclick="saveEdit(false)">Zapisz opis</button><button class="b go" onclick="saveEdit(true)">Renderuj ponownie</button></div></div></div>
-    <h2>Napisy</h2>${w.length ? `<p class="sub" style="margin-bottom:8px">Wyczyść pole, żeby usunąć słowo. Przygaszone słowa są poza przyciętym fragmentem.</p>
-      <div class="words" id="e_words">${w.map((x, i) => `<input data-s="${x[0]}" value="${esc(x[2])}" size="${Math.max(2, x[2].length)}">`).join('')}</div>`
+      <div class="row wrap"><button class="b" id="e_save" disabled onclick="saveEdit(false)">Zapisz opis</button><button class="b go" onclick="saveEdit(true)">Renderuj ponownie</button></div>
+      <div class="row wrap" style="margin-top:10px"><span class="sub">Inne formaty:</span>${[['16x9', 'Poziomy 16:9'], ['1x1', 'Kwadrat 1:1'], ['srt', 'Napisy SRT']].map(([f, t]) => `<button class="b" onclick="exportClip('${f}',this)">${t}</button>`).join('')}</div></div></div>
+    <h2>Napisy</h2>${w.length ? `<p class="sub" style="margin-bottom:8px">Popraw słowo albo wyczyść pole, żeby zniknęło z napisów. Przygaszone słowa są poza przyciętym fragmentem.</p>
+      <label class="row sub" style="gap:6px;margin-bottom:10px;cursor:pointer"><input type="checkbox" id="e_cutmode" style="accent-color:var(--hot)">Tryb wycinania: kliknij słowa, które mają zniknąć z filmu razem z obrazem i dźwiękiem</label>
+      <div class="words" id="e_words" onclick="if($('e_cutmode').checked&&event.target.tagName==='INPUT'){event.target.classList.toggle('cutw');event.target.blur()}">${w.map((x, i) => `<input data-s="${x[0]}" class="${(c.cut || [])[i] ? 'cutw' : ''}" value="${esc(x[2])}" size="${Math.max(2, x[2].length)}">`).join('')}</div>`
       : '<p class="sub">Ten klip nie ma transkrypcji.</p>'}</div></div>`;
 }
+async function exportClip(format, btn) {
+  const old = btn.textContent; btn.disabled = true; btn.textContent = 'Eksportuję…';
+  const r = await post('/api/clips/export', {id: sel, format}, true); btn.disabled = false; btn.textContent = old;
+  if (r.error) return toast(r.error);
+  const a = document.createElement('a'); a.href = '/clips/' + encodeURIComponent(r.file); a.download = r.file; document.body.append(a); a.click(); a.remove(); toast('Zapisano ' + r.file);
+}
+
+/* ---------- publikacja ---------- */
+const PLAT = [['shorts', 'Shorts'], ['tiktok', 'TikTok'], ['reels', 'Reels']];
+function pub(id, platform, obj) { const c = clip(id); c.pub = c.pub || {}; c.pub[platform] = Object.assign({at: '', done: false, views: 0}, c.pub[platform], obj);
+  if (obj.text != null) { c.posts = c.posts || {}; c.posts[platform] = obj.text; }
+  fetch('/api/clips/pub', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Object.assign({id, platform}, obj))}); }
+function copyText(t) { (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).catch(() => { const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); }); toast('Skopiowano'); }
+function vPublish() {
+  const list = ready().filter(c => c.review === 'ok');
+  const left = c => PLAT.filter(([k]) => !((c.pub || {})[k] || {}).done).length;
+  list.sort((a, b) => (left(b) > 0) - (left(a) > 0) || b.created - a.created);
+  return `<h1>Publikacja</h1><p class="lead">Zatwierdzone klipy z gotowym opisem na każdą platformę. Skopiuj opis, wrzuć klip, odhacz i po czasie wpisz wyświetlenia.</p>
+  ${list.map(c => `<div class="card" style="margin-bottom:14px"><div class="row wrap"><button class="link name" onclick="openClip('${c.id}')">${esc(c.title || c.channel)}</button>
+      <span class="sub grow">${esc(c.channel)}, ${when(c.created)}</span><a class="b" style="text-decoration:none" href="${src(c)}" download="${esc(c.file)}">Pobierz klip</a>
+      ${S.deps.ai ? `<button class="b" onclick="this.disabled=true;this.textContent='Piszę…';post('/api/clips/posts-ai',{id:'${c.id}'}).then(r=>{if(!r.error)toast('Opisy gotowe')})">Napisz opisy przez AI</button>` : ''}</div>
+    ${PLAT.map(([k, t]) => { const p = (c.pub || {})[k] || {}, txt = (c.posts || {})[k] || '';
+      return `<div class="pubrow"><b>${t}</b><textarea onchange="pub('${c.id}','${k}',{text:this.value})">${esc(txt)}</textarea>
+        <div class="ctl"><button class="b" onclick="copyText(this.closest('.pubrow').querySelector('textarea').value)">Kopiuj opis</button>
+          <label>Plan <input type="datetime-local" value="${esc(p.at || '')}" onchange="pub('${c.id}','${k}',{at:this.value})"></label>
+          <label class="row" style="gap:6px">Wrzucone <button type="button" class="sw ${p.done ? 'on' : ''}" aria-label="Wrzucone na ${t}" onclick="this.classList.toggle('on');pub('${c.id}','${k}',{done:this.classList.contains('on')})"></button></label>
+          <label>Wyświetlenia <input type="number" min="0" value="${p.views || 0}" onchange="pub('${c.id}','${k}',{views:+this.value})"></label></div></div>`; }).join('')}</div>`).join('') ||
+    '<div class="empty">Zatwierdź klip w zakładce Klipy, a pojawi się tutaj z opisami.</div>'}`;
+}
+
 function trim(el) {
   const a = $('e_in'), b = $('e_out'); if (!a) return;
   if (+b.value - +a.value < 3) { if (el === a) a.value = +b.value - 3; else b.value = +a.value + 3; }
@@ -362,7 +410,7 @@ function trim(el) {
 async function saveEdit(render) {
   const body = {id: sel, title: $('e_title').value, tags: $('e_tags').value};
   if (render) { body.rerender = true; body.t_in = +$('e_in').value; body.t_out = +$('e_out').value;
-    const w = document.querySelectorAll('#e_words input'); if (w.length) body.words = [...w].map(i => i.value); }
+    const w = document.querySelectorAll('#e_words input'); if (w.length) { body.words = [...w].map(i => i.value); body.cut = [...w].map(i => i.classList.contains('cutw')); } }
   const r = await post('/api/clips/update', body);
   if (!r.error) { toast(render ? 'Renderuję klip ponownie' : 'Zapisano opis'); if (render) go('clips'); }
 }
@@ -372,6 +420,11 @@ function vStats() {
   const count = f => { const m = {}; r.forEach(c => { const k = f(c); m[k] = (m[k] || 0) + 1; }); return Object.entries(m).sort((a, b) => b[1] - a[1]); };
   const hb = (rows) => { const max = Math.max(1, ...rows.map(x => x[1])); return rows.map(([k, v]) => `<div class="hbar"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k)}</span><div class="bar"><b style="width:${v / max * 100}%"></b></div><span class="num">${v}</span></div>`).join('') || '<p class="sub">Brak danych.</p>'; };
   const hours = Array(24).fill(0); r.forEach(c => hours[new Date(c.created * 1000).getHours()]++); const hm = Math.max(1, ...hours);
+  const views = c => PLAT.reduce((a, [k]) => a + (((c.pub || {})[k] || {}).views || 0), 0);
+  const posted = r.filter(c => views(c) > 0), allViews = posted.reduce((a, c) => a + views(c), 0);
+  const avgBy = f => { const m = {}; posted.forEach(c => { const k = f(c); (m[k] = m[k] || []).push(views(c)); });
+    return Object.entries(m).map(([k, v]) => [k, Math.round(v.reduce((a, b) => a + b, 0) / v.length)]).sort((a, b) => b[1] - a[1]); };
+  const byPlat = PLAT.map(([k, t]) => [t, r.reduce((a, c) => a + (((c.pub || {})[k] || {}).views || 0), 0)]);
   const best = [...scored].sort((a, b) => b.score.total - a.score.total).slice(0, 5);
   return `<h1>Statystyki</h1><p class="lead">Podsumowanie wszystkich gotowych klipów.</p>
   <div class="tiles"><div class="card tile"><b>${r.length}</b><span class="sub">gotowych klipów</span></div>
@@ -383,6 +436,9 @@ function vStats() {
     <div class="card"><h2 style="margin-top:0">Co wywołało klip</h2>${hb(count(c => c.reason))}</div>
     <div class="card"><h2 style="margin-top:0">Godziny, w których powstają klipy</h2><div class="chart tall">${hours.map(v => `<i style="height:${v / hm * 100}%" title="${v}"></i>`).join('')}</div>
       <div class="row sub"><span>0:00</span><span class="grow"></span><span>12:00</span><span class="grow"></span><span>23:00</span></div></div>
+    <div class="card"><h2 style="margin-top:0">Wyświetlenia według platformy</h2>${allViews ? hb(byPlat) : '<p class="sub">Wpisz wyświetlenia w zakładce Publikacja, żeby zobaczyć wyniki.</p>'}
+      ${allViews ? `<p class="sub" style="margin-top:8px">Łącznie ${allViews.toLocaleString('pl-PL')} wyświetleń z ${posted.length} klipów.</p>` : ''}</div>
+    <div class="card"><h2 style="margin-top:0">Średnie wyświetlenia: kanał i styl napisów</h2>${allViews ? hb(avgBy(c => c.channel)) + '<div style="height:10px"></div>' + hb(avgBy(c => 'styl: ' + ((S.cap_styles || {})[c.style] || c.style || 'nieznany'))) : '<p class="sub">Brak danych.</p>'}</div>
     <div class="card"><h2 style="margin-top:0">Najlepsze klipy</h2>${best.map(c => `<div class="row" style="margin:7px 0"><b class="num ${cls(c.score.total)}" style="width:32px">${c.score.total}</b>
       <button class="link grow" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="go('rating','${c.id}')">${esc(c.title || c.channel)}</button></div>`).join('') || '<p class="sub">Brak ocenionych klipów.</p>'}</div></div>`;
 }
@@ -392,7 +448,8 @@ const FIELDS = [
   ['Wykrywanie', [['auto_clip', 'Automatyczne klipy', 'bool'], ['multiplier', 'Czułość (ile razy więcej niż średnia czatu)', 'num', 0.1], ['min_msgs', 'Minimum wiadomości w oknie', 'num', 1],
     ['bucket_sec', 'Długość okna (s)', 'num', 1], ['cooldown_sec', 'Przerwa między klipami (s)', 'num', 1],
     ['keywords', 'Słowa-wyzwalacze (po przecinku, puste = wyłączone)', 'text'], ['keyword_hits', 'Ile wiadomości ze słowem w oknie', 'num', 1]]],
-  ['Klip', [['pre_sec', 'Sekund przed skokiem', 'num', 1], ['post_sec', 'Sekund po skoku', 'num', 1],
+  ['Klip', [['safe_zones', 'Strefy bezpieczne TikToka, Reels i Shorts', 'bool'], ['hook_len', 'Długość klipu z haczykiem (s)', 'num', 1], ['hook_lead', 'Start: ile sekund przed reakcją czatu', 'num', 0.5],
+    ['pre_sec', 'Zapas nagrania przed skokiem (s)', 'num', 1], ['post_sec', 'Zapas nagrania po skoku (s)', 'num', 1],
     ['layout', 'Kadr', 'sel', [['blur', 'Cały obraz i rozmyte tło'], ['crop', 'Przycięcie do środka']]],
     ['quality', 'Jakość nagrywania', 'sel', [['720p60,720p,best', '720p'], ['1080p60,1080p,best', '1080p'], ['best', 'Najlepsza'], ['480p,worst', '480p']]],
     ['keep_sources', 'Zachowuj źródło klipu (potrzebne w Edytorze)', 'bool'], ['keep_recordings', 'Zachowuj pełne nagrania streamów', 'bool']]],
@@ -476,12 +533,12 @@ async function aiTest() {
 }
 
 /* ---------- petla ---------- */
-const RENDER = {channels: vChannels, monitor: vMonitor, clips: vClips, rating: vRating, editor: vEditor, stats: vStats, settings: vSettings};
+const RENDER = {channels: vChannels, monitor: vMonitor, clips: vClips, rating: vRating, editor: vEditor, publish: vPublish, stats: vStats, settings: vSettings};
 const LIVE = {channels: 1, monitor: 1, stats: 1};       // widoki odswiezane co 2 s; pozostale tylko przy zmianie klipow
 function draw(force) {
   if (!S) return;
   const s2 = S.clips.map(c => c.id + c.status + (c.rev || 0) + (c.title || '') + (c.ai ? 1 : 0) + (c.review || '')).join();
-  if (!force && !LIVE[view] && (s2 === sig || view === 'settings' || view === 'editor')) return;
+  if (!force && !LIVE[view] && (s2 === sig || view === 'settings' || view === 'editor' || view === 'publish')) return;
   if (!force && view === 'channels' && document.activeElement && document.activeElement.name === 'q') return;
   sig = s2;
   const log = $('log'), top = log ? log.scrollTop : null;
