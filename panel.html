@@ -156,6 +156,7 @@ function vChannels() {
   const warn = [];
   if (!S.deps.ffmpeg) warn.push('Brak FFmpeg, więc klipy nie powstaną. Zainstaluj: winget install Gyan.FFmpeg i uruchom Clipper ponownie.');
   if (!S.deps.whisper && S.settings.captions) warn.push('Brak faster-whisper, więc klipy będą bez napisów.');
+  if (S.deps.caption_error && S.settings.captions) warn.push('Napisy nie zadziałały przy ostatnim klipie: ' + esc(S.deps.caption_error));
   return `<h1>Kanały</h1><p class="lead">Dodaj kanały Twitch. Clipper sam czeka, aż wejdą na żywo, i tnie klip, gdy czat wybuchnie.</p>
   ${warn.map(w => `<div class="card warn">${w}</div>`).join('')}
   <form class="row" style="margin-bottom:16px" onsubmit="event.preventDefault();const i=this.q;if(i.value.trim()){post('/api/channels/add',{name:i.value,ai:addAI});i.value=''}">
@@ -178,7 +179,7 @@ function vChannels() {
 
 const CH_FIELDS = [['facecam', 'Układ z kamerką (kamerka u góry, gra na dole)'], ['title_bar', 'Nagłówek z tytułem klipu'], ['progress', 'Pasek postępu'],
   ['logo', 'Logo / znak wodny'], ['censor', 'Cenzura przekleństw'], ['cut_silence', 'Wycinanie ciszy'], ['highlight', 'Wyróżnianie słów kluczowych'],
-  ['loudnorm', 'Wyrównanie głośności'], ['audio_trigger', 'Klip także przy skoku głośności']];
+  ['loudnorm', 'Wyrównanie głośności'], ['ai_cut', 'AI wybiera najlepszy fragment i tytuł (1 zapytanie na klip)'], ['audio_trigger', 'Klip także przy skoku głośności']];
 const CAMS = {'Lewy dół': [2, 68, 26, 30], 'Prawy dół': [72, 68, 26, 30], 'Lewy górny': [2, 2, 26, 30], 'Prawy górny': [72, 2, 26, 30]};
 function chOpts(name) {
   const c = S.channels.find(x => x.name === name), o = c.opts, d = $('chdlg');
@@ -353,7 +354,7 @@ const FIELDS = [
   ['Szablon i obróbka (włączasz per kanał w Opcjach)', [['logo_path', 'Ścieżka do pliku logo (PNG)', 'text'],
     ['logo_pos', 'Pozycja logo', 'sel', [['tr', 'Prawy górny róg'], ['tl', 'Lewy górny róg'], ['br', 'Prawy dolny róg'], ['bl', 'Lewy dolny róg']]],
     ['censor_words', 'Cenzurowane słowa (początki, po przecinku)', 'text'], ['highlight_words', 'Wyróżniane słowa (po przecinku)', 'text'],
-    ['kw_color', 'Kolor wyróżnionych słów', 'color'], ['silence_gap', 'Wycinaj ciszę dłuższą niż (s)', 'num', 0.5],
+    ['kw_color', 'Kolor wyróżnionych słów', 'color'], ['silence_gap', 'Wycinaj ciszę dłuższą niż (s)', 'num', 0.5], ['game_zoom', 'Przybliżenie gry w układzie z kamerką (1 = cały obraz)', 'num', 0.05],
     ['audio_db', 'Skok głośności: o ile dB ponad zwykły poziom', 'num', 1], ['auto_delete_below', 'Kasuj klipy z oceną poniżej (0 = nie kasuj)', 'num', 1]]],
   ['AI (ocena klipów i dobór ustawień kanału)', [['ai_mode', 'Skąd AI', 'sel', [['api', 'Klucz API Anthropic'], ['cli', 'Claude Code (logowanie kontem Claude)']]],
     ['ai_key', 'Klucz API (tylko dla trybu z kluczem)', 'pass'], ['ai_model', 'Model (tylko dla trybu z kluczem)', 'text']]],
