@@ -107,7 +107,7 @@ ul.tips{padding-left:18px;margin:6px 0}ul.tips li{margin:5px 0}
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let S = null, view = ['monitor','clips','rating','editor','stats','settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'new', rev: ''}, aiBusy = false;
+let S = null, view = ['monitor','clips','rating','editor','stats','settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'new', rev: ''}, aiBusy = false, addAI = false;
 const VIEWS = [['channels', 'Kanały'], ['monitor', 'Monitor'], ['clips', 'Klipy'], ['rating', 'Ocena'], ['editor', 'Edytor'], ['stats', 'Statystyki'], ['settings', 'Ustawienia']];
 
 async function post(path, body, quiet) {
@@ -157,12 +157,16 @@ function vChannels() {
   if (!S.deps.whisper && S.settings.captions) warn.push('Brak faster-whisper, więc klipy będą bez napisów.');
   return `<h1>Kanały</h1><p class="lead">Dodaj kanały Twitch. Clipper sam czeka, aż wejdą na żywo, i tnie klip, gdy czat wybuchnie.</p>
   ${warn.map(w => `<div class="card warn">${w}</div>`).join('')}
-  <form class="row" style="margin-bottom:16px" onsubmit="event.preventDefault();const i=this.q;if(i.value.trim()){post('/api/channels/add',{name:i.value});i.value=''}">
-    <input name="q" class="grow" placeholder="Nazwa kanału lub link twitch.tv/…" autocomplete="off"><button class="b go">Dodaj kanał</button></form>
+  <form class="row" style="margin-bottom:16px" onsubmit="event.preventDefault();const i=this.q;if(i.value.trim()){post('/api/channels/add',{name:i.value,ai:addAI});i.value=''}">
+    <input name="q" class="grow" placeholder="Nazwa kanału lub link twitch.tv/…" autocomplete="off"><label class="row sub" style="gap:6px;cursor:pointer" title="Claude obejrzy klatkę ze streama, tytuł, kategorię i czat, a potem sam ustawi opcje kanału. Wymaga klucza API."><input type="checkbox" ${addAI ? 'checked' : ''} onchange="addAI=this.checked" style="accent-color:var(--cyan)">AI dobierze ustawienia</label>
+    <button class="b go">Dodaj kanał</button></form>
   <div class="grid">${S.channels.map(c => { const last = c.hist.length ? c.hist[c.hist.length - 1] : 0; return `<div class="card">
     <div class="row"><span class="dot ${c.state}"></span><div class="grow"><div class="name">${esc(c.name)}</div><div class="sub">${statusText(c)}</div></div>
       ${sw(c.enabled, `post('/api/channels/toggle',{name:'${c.name}',enabled:${!c.enabled}})`, 'Włącz kanał')}</div>
     <div class="chart">${bars(c, 30)}</div>
+    ${c.ai.state === 'off' ? '' : `<div class="sub" style="margin-bottom:8px;color:${c.ai.state === 'error' ? 'var(--hot)' : c.ai.state === 'done' ? 'var(--mint)' : 'var(--amber)'}">${
+      c.ai.state === 'done' ? 'AI dobrało ustawienia. ' + esc(c.ai.note) : c.ai.state === 'error' ? 'AI nie dobrało ustawień: ' + esc(c.ai.note)
+      : c.ai.state === 'working' ? 'AI analizuje kanał…' : 'AI czeka, aż kanał będzie na żywo i zbierze 2 minuty czatu.'}</div>`}
     <div class="row"><div class="sub grow">${c.enabled ? (c.chat ? `${last} wiad. w oknie` + (c.thr ? `, próg ${Math.round(c.thr)}` : ', zbieram średnią') : 'Łączę z czatem…') : ''}</div>
       <button class="b" ${c.state === 'live' ? '' : 'disabled'} onclick="post('/api/clip',{name:'${c.name}'})">Klip teraz</button>
       <button class="b" onclick="chOpts('${c.name}')">Opcje</button>
@@ -183,12 +187,18 @@ function chOpts(name) {
     <h2>Obszar kamerki na streamie (w % obrazu)</h2>
     <div class="row wrap"><select onchange="if(this.value)CAMS[this.value].forEach((v,i)=>document.querySelectorAll('#chdlg [data-cam]')[i].value=v)"><option value="">Szybki wybór…</option>${Object.keys(CAMS).map(k => `<option>${k}</option>`).join('')}</select>
       ${['Od lewej', 'Od góry', 'Szerokość', 'Wysokość'].map((t, i) => `<label class="sub">${t}<br><input type="number" min="0" max="100" style="width:76px" data-cam value="${o.cam[i]}"></label>`).join('')}</div>
-    <div class="row" style="margin-top:16px"><span class="grow"></span><button class="b go" onclick="saveCh('${name}')">Zapisz opcje</button></div>`;
+    <h2>Wykrywanie tylko dla tego kanału</h2><p class="sub" style="margin-bottom:8px">Puste pole oznacza wartość z Ustawień.</p>
+    ${[['multiplier', 'Czułość (× średniej czatu)', 'number'], ['min_msgs', 'Minimum wiadomości w oknie', 'number'], ['keywords', 'Słowa-wyzwalacze', 'text'],
+       ['keyword_hits', 'Ile wiadomości ze słowem', 'number'], ['language', 'Język napisów (np. pl, en)', 'text']].map(([k, t, ty]) =>
+      `<div class="field"><span>${t}</span><input type="${ty}" step="0.1" data-v="${k}" value="${esc(o[k] ?? '')}" placeholder="${esc(S.settings[k])}" style="width:${ty === 'text' ? 200 : 90}px"></div>`).join('')}
+    <div class="row" style="margin-top:16px"><button class="b" onclick="chdlg.close();post('/api/channels/ai',{name:'${name}'}).then(r=>{if(!r.error)toast('AI dobierze ustawienia, gdy kanał będzie na żywo')})">Dobierz przez AI</button>
+      <span class="grow"></span><button class="b go" onclick="saveCh('${name}')">Zapisz opcje</button></div>`;
   d.showModal();
 }
 async function saveCh(name) {
   const opts = {cam: [...document.querySelectorAll('#chdlg [data-cam]')].map(i => +i.value)};
   document.querySelectorAll('#chdlg [data-o]').forEach(b => { opts[b.dataset.o] = b.classList.contains('on'); });
+  document.querySelectorAll('#chdlg [data-v]').forEach(i => { opts[i.dataset.v] = i.value.trim(); });
   const r = await post('/api/channels/options', {name, opts}); $('chdlg').close(); if (!r.error) toast('Zapisano opcje kanału');
 }
 

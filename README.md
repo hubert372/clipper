@@ -55,6 +55,11 @@ w `data/clipper.log`. Panel w przeglądarce zamiast okna: `python app.py --brows
 - Przycisk **Opcje** przy kanale włącza osobno dla niego: układ z kamerką, nagłówek z tytułem,
   pasek postępu, logo, cenzurę przekleństw, wycinanie ciszy, wyróżnianie słów, wyrównanie
   głośności i klip przy skoku głośności. Listy słów i plik logo ustawiasz w Ustawieniach.
+- **AI dobierze ustawienia** (pole przy dodawaniu kanału albo przycisk w Opcjach): gdy kanał
+  jest na żywo i zbierze ok. 2 minuty czatu, Clipper wysyła do API Anthropic jedną klatkę
+  ze streama, tytuł, kategorię i próbkę czatu, a model ustawia czułość, słowa-wyzwalacze,
+  język napisów, obszar kamerki i pozostałe opcje kanału. Wymaga klucza API, jedno płatne
+  zapytanie na kanał. Wynik można potem poprawić ręcznie w Opcjach.
 - W zakładce **Klipy** zatwierdzasz lub odrzucasz nowe klipy (odrzucone są kasowane),
   a zatwierdzone pobierasz jedną paczką ZIP z plikiem `opisy.txt`.
 
