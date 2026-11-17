@@ -39,7 +39,7 @@ background:radial-gradient(260px circle at var(--mx,50%) var(--my,50%),rgba(88,2
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px}
 .grid.big{grid-template-columns:repeat(auto-fill,minmax(440px,1fr))}
 .row{display:flex;align-items:center;gap:10px}.grow{flex:1;min-width:0}.wrap{flex-wrap:wrap}
-button.b{font:600 14px var(--head);letter-spacing:.3px;border:1px solid var(--edge);background:var(--fill);color:var(--cyan);padding:8px 14px;cursor:pointer;
+button.b,a.b{font:600 14px var(--head);letter-spacing:.3px;border:1px solid var(--edge);background:var(--fill);color:var(--cyan);padding:8px 14px;cursor:pointer;
 clip-path:polygon(0 0,calc(100% - 8px) 0,100% 8px,100% 100%,8px 100%,0 calc(100% - 8px));transition:background .15s,color .15s}
 button.b:hover{background:rgba(88,230,255,.2)}
 button.b.go{background:var(--cyan);color:var(--ink);border-color:var(--cyan)}button.b.go:hover{background:#9af1ff}
@@ -48,7 +48,7 @@ input,select,textarea{font:inherit;color:var(--text);background:rgba(7,11,20,.7)
 input[type=color]{padding:2px;width:46px;height:34px}input[type=range]{padding:0;border:0;background:none;accent-color:var(--cyan);width:100%}
 .name{font:600 18px var(--head);letter-spacing:.3px;overflow:hidden;text-overflow:ellipsis}
 .dot{width:10px;height:10px;border-radius:50%;background:#3a4560;flex:none}
-dialog{border:1px solid var(--edge);background:#0b111e;color:var(--text);padding:20px;width:min(520px,94vw);max-height:90vh}
+dialog{margin:auto;border:1px solid var(--edge);background:#0b111e;color:var(--text);padding:20px;width:min(520px,94vw);max-height:90vh}
 dialog::backdrop{background:rgba(3,6,12,.7);backdrop-filter:blur(4px)}
 .status{margin:0 4px 14px;padding:12px;border:1px solid var(--edge);font-size:13px;color:var(--sub);line-height:1.7}
 .status b{color:var(--text)}.status button{width:100%;margin-top:8px;text-align:center}
@@ -96,6 +96,13 @@ ul.tips{padding-left:18px;margin:6px 0}ul.tips li{margin:5px 0}
 .themes button{all:unset;cursor:pointer;display:flex;align-items:center;gap:7px;padding:6px 10px;border:1px solid var(--edge);font-size:13px}
 .themes button:hover{background:var(--fill)}.themes i{width:14px;height:14px;border-radius:50%;border:1px solid rgba(255,255,255,.3)}
 .styles span{display:block;padding:7px 9px;font:600 14px var(--head)}
+video:fullscreen{object-fit:contain!important;aspect-ratio:auto!important;background:#000}
+.thumb{position:relative;cursor:pointer}.thumb .play{position:absolute;inset:0;display:grid;place-items:center;font-size:44px;color:#fff;background:rgba(7,11,20,.25);opacity:0;transition:opacity .15s}
+.thumb:hover .play,.thumb:focus-visible .play{opacity:1}
+#clipdlg{width:min(980px,96vw);padding:18px}
+.viewer{display:grid;grid-template-columns:minmax(0,340px) 1fr;gap:20px;align-items:start}
+.viewer video{width:100%;max-height:80vh;aspect-ratio:9/16;background:#000;object-fit:contain}
+@media(max-width:760px){.viewer{grid-template-columns:1fr}.viewer video{max-height:56vh}}
 .toast{position:fixed;right:22px;bottom:22px;z-index:5;background:var(--panel);border:1px solid var(--cyan);padding:10px 16px;opacity:0;transform:translateY(8px);transition:.25s;pointer-events:none}
 .toast.on{opacity:1;transform:none}
 @media(max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:auto 1fr}nav{flex-direction:row;overflow:auto;padding:8px;border-right:0;border-bottom:1px solid var(--edge)}
@@ -110,6 +117,7 @@ ul.tips{padding-left:18px;margin:6px 0}ul.tips li{margin:5px 0}
   <main id="view"></main>
 </div>
 <dialog id="chdlg"></dialog>
+<dialog id="clipdlg"></dialog>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -229,7 +237,7 @@ function vMonitor() {
 
 function clipCard(c) {
   const sc = total(c);
-  const body = c.status === 'ready' ? `<video src="${src(c)}#t=0.5" controls preload="metadata" playsinline></video>`
+  const body = c.status === 'ready' ? `<div class="thumb" tabindex="0" role="button" aria-label="Otwórz klip" onclick="openClip('${c.id}')" onkeydown="if(event.key==='Enter')openClip('${c.id}')"><video src="${src(c)}#t=0.5" preload="metadata" muted playsinline></video><span class="play">▶</span></div>`
     : `<div class="ph">${c.status === 'error' ? 'Nie udało się: ' + esc(c.error || '') : c.status === 'processing' ? 'Renderuję…' : 'Czekam na dalszy ciąg…'}</div>`;
   return `<div class="card clip">${body}${sc != null && c.status === 'ready' ? `<span class="badge ${cls(sc)}">${sc}</span>` : ''}<div class="meta">
     <div class="t" title="${esc(c.title)}">${esc(c.title || c.channel)}</div>
@@ -240,6 +248,31 @@ function clipCard(c) {
       ${c.src ? `<button class="link" onclick="go('editor','${c.id}')">Edytuj</button>` : ''}<a class="link" href="${src(c)}" download="${esc(c.file)}">Pobierz</a>
       <button class="link" onclick="copyDesc('${c.id}')">Kopiuj opis</button>` : ''}
       ${c.status === 'ready' || c.status === 'error' ? `<button class="link bad" onclick="if(confirm('Usunąć ten klip?'))post('/api/clips/delete',{id:'${c.id}'})">Usuń</button>` : ''}</div></div></div>`;
+}
+let viewId = null;
+function openClip(id) {
+  const c = clip(id); if (!c || c.status !== 'ready') return; viewId = id;
+  const d = $('clipdlg'); d.innerHTML = `<div class="viewer"><video src="${src(c)}" controls autoplay playsinline></video><div id="clipside"></div></div>`;
+  d.onclose = () => { d.innerHTML = ''; viewId = null; }; drawSide(); d.showModal();
+}
+function drawSide() {
+  const box = $('clipside'); if (!box || !viewId) return;
+  const c = clip(viewId); if (!c) return $('clipdlg').close();
+  const sc = c.score || {total: 0, parts: [], tips: []}, shut = "$('clipdlg').close();";
+  box.innerHTML = `<div class="row"><div class="name grow">${esc(c.title || c.channel)}</div><button class="link" onclick="${shut}">Zamknij</button></div>
+    <div class="sub" style="margin:4px 0 10px">${esc(c.channel)}, ${when(c.created)}, ${c.len || '?'} s, ${esc(c.reason)}</div>
+    <span class="tag ${c.review === 'ok' ? 'ok' : ''}">${c.review === 'ok' ? 'zatwierdzony' : 'do przejrzenia'}</span>
+    <div class="row" style="margin:14px 0 6px"><b class="num ${cls(sc.total)}" style="font-size:34px">${sc.total}</b><span class="sub">ocena na 100</span></div>
+    ${sc.parts.map(p => `<div class="part"><span>${esc(p.name)}</span><div class="bar"><b style="width:${p.score / p.max * 100}%"></b></div><span class="num sub">${p.score}/${p.max}</span></div>`).join('')}
+    ${sc.tips.length ? `<h2>Co poprawić</h2><ul class="tips">${sc.tips.slice(0, 4).map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+    <p class="sub" style="margin:10px 0">${esc(c.tags || '')}</p>
+    ${c.review !== 'ok' ? `<div class="row" style="margin-bottom:10px"><button class="b go grow" onclick="post('/api/clips/review',{id:'${c.id}',ok:true})">Zatwierdź</button>
+      <button class="b bad grow" onclick="${shut}post('/api/clips/review',{id:'${c.id}',ok:false})">Odrzuć</button></div>` : ''}
+    <div class="row wrap"><button class="b" onclick="${shut}go('rating','${c.id}')">Pełna ocena i AI</button>
+      ${c.src ? `<button class="b" onclick="${shut}go('editor','${c.id}')">Edytuj</button>` : ''}
+      <a class="b" style="text-decoration:none" href="${src(c)}" download="${esc(c.file)}">Pobierz</a>
+      <button class="b" onclick="copyDesc('${c.id}')">Kopiuj opis</button>
+      <button class="b bad" onclick="if(confirm('Usunąć ten klip?')){${shut}post('/api/clips/delete',{id:'${c.id}'})}">Usuń</button></div>`;
 }
 function vClips() {
   let list = S.clips.filter(c => (!filt.ch || c.channel === filt.ch) && (!filt.rev || (filt.rev === 'ok' ? c.review === 'ok' : c.review !== 'ok')));
@@ -452,7 +485,7 @@ async function refresh(force) {
   try { S = await (await fetch('/api/state')).json(); } catch { return; }
   const ids = new Set(ready().map(c => c.id));
   if (known && S.settings.notify_sound && [...ids].some(i => !known.has(i))) { beep(); toast('Nowy klip jest gotowy'); }
-  known = ids; drawNav(); draw(force === true); if (view === 'settings' && force !== true) applyDeps();
+  known = ids; drawNav(); draw(force === true); drawSide(); if (view === 'settings' && force !== true) applyDeps();
 }
 refresh(true); setInterval(refresh, 2000);
 document.addEventListener('pointermove', e => { const c = e.target.closest && e.target.closest('.card'); if (c) { const r = c.getBoundingClientRect();
