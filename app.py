@@ -57,6 +57,7 @@ DEFAULTS = {
     "hashtags": "#twitch #clips #fyp",
     "notify_sound": True, "discord_webhook": "",
     "ai_key": "", "ai_model": "claude-haiku-5-5",
+    "ai_mode": "api",         # api = klucz API, cli = Claude Code zalogowany subskrypcja
     "logo_path": "", "logo_pos": "tr",
     "censor_words": "kurw,chuj,pierd,jeb,fuck,shit",   # poczatki slow do wyciszenia
     "highlight_words": "", "kw_color": "#FF4D9D",
@@ -307,8 +308,51 @@ def local_score(clip, words, dur, loud, s):
     return {"total": sum(p["score"] for p in parts), "parts": parts, "tips": tips, "loud": loud}
 
 
+def ai_ready(s):
+    return bool(which("claude")) if s["ai_mode"] == "cli" else bool(s["ai_key"])
+
+
+def ai_missing(s):
+    return ("Zainstaluj Claude Code i zaloguj się w nim (polecenie: claude), albo przełącz AI na klucz API"
+            if s["ai_mode"] == "cli" else "Dodaj klucz API w Ustawieniach albo przełącz AI na Claude Code")
+
+
+def claude_cli(content):
+    """Zapytanie przez Claude Code (claude -p) zalogowany kontem uzytkownika - bez klucza API."""
+    exe = which("claude")
+    if not exe:
+        raise RuntimeError("nie znaleziono programu claude (Claude Code)")
+    blocks = content if isinstance(content, list) else [{"type": "text", "text": content}]
+    prompt, shot = "", DATA / "ai_frame.jpg"
+    for b in blocks:
+        if b["type"] == "image":
+            shot.write_bytes(base64.b64decode(b["source"]["data"]))
+            prompt += "Najpierw obejrzyj obraz z pliku ai_frame.jpg w biezacym folderze (narzedzie Read).\n"
+        else:
+            prompt += b["text"]
+    cmd = [exe, "-p", "--output-format", "json", "--max-turns", "4"]
+    if shot.exists():
+        cmd += ["--allowedTools", "Read"]
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}   # wymus logowanie subskrypcja
+    try:
+        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           cwd=DATA, env=env, timeout=240, creationflags=NO_WINDOW)
+    finally:
+        shot.unlink(missing_ok=True)
+    try:
+        data = json.loads(r.stdout)
+    except ValueError:
+        raise RuntimeError("Claude Code nie odpowiedzial poprawnie: " + (r.stderr or r.stdout)[-200:])
+    if data.get("is_error"):
+        raise RuntimeError("Claude Code: " + str(data.get("result"))[:200])
+    return str(data.get("result", ""))
+
+
 def claude_json(s, content, max_tokens):
-    """Wysyla zapytanie do API Anthropic i zwraca obiekt JSON z odpowiedzi."""
+    """Wysyla zapytanie do Claude (API albo Claude Code) i zwraca obiekt JSON z odpowiedzi."""
+    if s["ai_mode"] == "cli":
+        text = claude_cli(content)
+        return json.loads(re.search(r"\{.*\}", text, re.S).group(0))
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
         data=json.dumps({"model": s["ai_model"], "max_tokens": max_tokens,
@@ -946,7 +990,8 @@ class App:
                 "paused": self.paused,
                 "queue": sum(1 for c in self.clips if c["status"] in ("pending", "processing")),
                 "logs": list(self.logs)[-40:],
-                "deps": {"ffmpeg": bool(which("ffmpeg") and which("ffprobe")), "whisper": whisper_available()},
+                "deps": {"ffmpeg": bool(which("ffmpeg") and which("ffprobe")), "whisper": whisper_available(),
+                         "ai": ai_ready(self.settings)},
                 "now": time.time(),
             }
 
@@ -961,16 +1006,16 @@ class App:
                 self.channels[name].start()
                 self.log("%s: dodano kanal" % name)
             if body.get("ai"):
-                if not self.settings["ai_key"]:
+                if not ai_ready(self.settings):
                     self.save()
-                    return {"error": "Kanał dodany, ale dobór przez AI wymaga klucza API w Ustawieniach"}
+                    return {"error": "Kanał dodany, ale AI nie jest gotowe. " + ai_missing(self.settings)}
                 self.channels[name].ai = {"state": "waiting", "note": ""}
         elif path == "/api/channels/ai":
             ch = self.channels.get(body.get("name"))
             if not ch:
                 return {"error": "Nie ma takiego kanału"}
-            if not self.settings["ai_key"]:
-                return {"error": "Dodaj klucz API w Ustawieniach"}
+            if not ai_ready(self.settings):
+                return {"error": ai_missing(self.settings)}
             ch.ai = {"state": "waiting", "note": ""}
             ch.maybe_tune()
         elif path == "/api/channels/remove":
@@ -1035,8 +1080,8 @@ class App:
             c = next((c for c in self.clips if c["id"] == body.get("id")), None)
             if not c or c["status"] != "ready":
                 return {"error": "Klip nie jest gotowy"}
-            if not self.settings["ai_key"]:
-                return {"error": "Dodaj klucz API w Ustawieniach"}
+            if not ai_ready(self.settings):
+                return {"error": ai_missing(self.settings)}
             try:
                 c["ai"] = ai_review(c, self.settings)
             except Exception as e:
@@ -1056,6 +1101,8 @@ class App:
                         self.settings[k] = bool(v) if isinstance(d, bool) else type(d)(v)
                     except (TypeError, ValueError):
                         pass
+            if self.settings["ai_mode"] not in ("api", "cli"):
+                self.settings["ai_mode"] = "api"
             self.settings["auto_delete_below"] = max(0, min(100, self.settings["auto_delete_below"]))
             for k in ("bucket_sec", "window_buckets", "pre_sec", "post_sec", "keyword_hits", "cap_words"):
                 self.settings[k] = max(1, self.settings[k])

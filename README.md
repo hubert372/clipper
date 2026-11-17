@@ -63,6 +63,14 @@ w `data/clipper.log`. Panel w przeglądarce zamiast okna: `python app.py --brows
 - W zakładce **Klipy** zatwierdzasz lub odrzucasz nowe klipy (odrzucone są kasowane),
   a zatwierdzone pobierasz jedną paczką ZIP z plikiem `opisy.txt`.
 
+## AI bez klucza API (Claude Code)
+
+W Ustawieniach, w grupie AI, można wybrać „Claude Code (logowanie kontem Claude)”. Clipper
+uruchamia wtedy lokalnie zainstalowany program `claude` w trybie `claude -p`, więc zapytania
+idą przez Twoje logowanie w Claude Code i liczą się do limitów subskrypcji. Wymaga
+zainstalowanego Claude Code i jednorazowego zalogowania (uruchom `claude` w terminalu).
+Clipper sam nie loguje do Claude i nie widzi Twoich danych logowania.
+
 Klucz API i webhook są zapisywane lokalnie w `data/config.json`.
 
 ## Dobrze wiedzieć

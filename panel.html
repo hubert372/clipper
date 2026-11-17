@@ -158,7 +158,7 @@ function vChannels() {
   return `<h1>Kanały</h1><p class="lead">Dodaj kanały Twitch. Clipper sam czeka, aż wejdą na żywo, i tnie klip, gdy czat wybuchnie.</p>
   ${warn.map(w => `<div class="card warn">${w}</div>`).join('')}
   <form class="row" style="margin-bottom:16px" onsubmit="event.preventDefault();const i=this.q;if(i.value.trim()){post('/api/channels/add',{name:i.value,ai:addAI});i.value=''}">
-    <input name="q" class="grow" placeholder="Nazwa kanału lub link twitch.tv/…" autocomplete="off"><label class="row sub" style="gap:6px;cursor:pointer" title="Claude obejrzy klatkę ze streama, tytuł, kategorię i czat, a potem sam ustawi opcje kanału. Wymaga klucza API."><input type="checkbox" ${addAI ? 'checked' : ''} onchange="addAI=this.checked" style="accent-color:var(--cyan)">AI dobierze ustawienia</label>
+    <input name="q" class="grow" placeholder="Nazwa kanału lub link twitch.tv/…" autocomplete="off"><label class="row sub" style="gap:6px;cursor:pointer" title="Claude obejrzy klatkę ze streama, tytuł, kategorię i czat, a potem sam ustawi opcje kanału. Wymaga AI ustawionego w Ustawieniach."><input type="checkbox" ${addAI ? 'checked' : ''} onchange="addAI=this.checked" style="accent-color:var(--cyan)">AI dobierze ustawienia</label>
     <button class="b go">Dodaj kanał</button></form>
   <div class="grid">${S.channels.map(c => { const last = c.hist.length ? c.hist[c.hist.length - 1] : 0; return `<div class="card">
     <div class="row"><span class="dot ${c.state}"></span><div class="grow"><div class="name">${esc(c.name)}</div><div class="sub">${statusText(c)}</div></div>
@@ -274,7 +274,7 @@ function vRating() {
         <ul class="tips">${(ai.tips || []).map(t => `<li>${esc(t)}</li>`).join('')}</ul>
         ${ai.title ? `<div class="row wrap" style="margin-top:10px"><span class="grow">Propozycja: <b>${esc(ai.title)}</b><br><span class="sub">${esc(ai.hashtags || '')}</span></span>
           <button class="b" onclick="post('/api/clips/update',{id:'${c.id}',title:clip('${c.id}').ai.title,tags:clip('${c.id}').ai.hashtags||clip('${c.id}').tags}).then(()=>toast('Zastosowano tytuł'))">Użyj tytułu</button></div>` : ''}`
-        : `<p class="sub" style="margin-top:8px">${S.settings.ai_key ? 'Jedno zapytanie na klip, płatne z Twojego klucza API.' : 'Dodaj klucz API w Ustawieniach, żeby włączyć ocenę AI.'}</p>`}</div>
+        : `<p class="sub" style="margin-top:8px">${S.deps.ai ? (S.settings.ai_mode === 'cli' ? 'Jedno zapytanie na klip przez Claude Code, liczone do limitów Twojej subskrypcji.' : 'Jedno zapytanie na klip, płatne z Twojego klucza API.') : 'Włącz AI w Ustawieniach: klucz API albo Claude Code zalogowany Twoim kontem.'}</p>`}</div>
   </div></div>`;
 }
 async function askAI(id) { aiBusy = true; draw(true); const r = await post('/api/clips/ai', {id}); aiBusy = false; sig = ''; draw(true); if (!r.error) toast('Ocena AI gotowa'); }
@@ -351,7 +351,8 @@ const FIELDS = [
     ['censor_words', 'Cenzurowane słowa (początki, po przecinku)', 'text'], ['highlight_words', 'Wyróżniane słowa (po przecinku)', 'text'],
     ['kw_color', 'Kolor wyróżnionych słów', 'color'], ['silence_gap', 'Wycinaj ciszę dłuższą niż (s)', 'num', 0.5],
     ['audio_db', 'Skok głośności: o ile dB ponad zwykły poziom', 'num', 1], ['auto_delete_below', 'Kasuj klipy z oceną poniżej (0 = nie kasuj)', 'num', 1]]],
-  ['Ocena AI', [['ai_key', 'Klucz API Anthropic', 'pass'], ['ai_model', 'Model', 'text']]],
+  ['AI (ocena klipów i dobór ustawień kanału)', [['ai_mode', 'Skąd AI', 'sel', [['api', 'Klucz API Anthropic'], ['cli', 'Claude Code (logowanie kontem Claude)']]],
+    ['ai_key', 'Klucz API (tylko dla trybu z kluczem)', 'pass'], ['ai_model', 'Model (tylko dla trybu z kluczem)', 'text']]],
 ];
 function vSettings() {
   return `<div class="row"><h1 class="grow">Ustawienia</h1><button class="b go" onclick="saveSettings()">Zapisz ustawienia</button></div>
