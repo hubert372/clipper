@@ -48,6 +48,16 @@ w `data/clipper.log`. Panel w przeglądarce zamiast okna: `python app.py --brows
 - **Ustawienia** – wykrywanie, słowa-wyzwalacze, styl napisów, powiadomienia (dźwięk,
   webhook Discorda), klucz AI.
 
+## Start, pauza i opcje kanału
+
+- Przycisk **Pauza / Start** w lewym panelu wstrzymuje i wznawia nagrywanie wszystkich
+  kanałów. Obok widać stan, liczbę kanałów na żywo, kolejkę renderu i czas ostatniego klipu.
+- Przycisk **Opcje** przy kanale włącza osobno dla niego: układ z kamerką, nagłówek z tytułem,
+  pasek postępu, logo, cenzurę przekleństw, wycinanie ciszy, wyróżnianie słów, wyrównanie
+  głośności i klip przy skoku głośności. Listy słów i plik logo ustawiasz w Ustawieniach.
+- W zakładce **Klipy** zatwierdzasz lub odrzucasz nowe klipy (odrzucone są kasowane),
+  a zatwierdzone pobierasz jedną paczką ZIP z plikiem `opisy.txt`.
+
 Klucz API i webhook są zapisywane lokalnie w `data/config.json`.
 
 ## Dobrze wiedzieć

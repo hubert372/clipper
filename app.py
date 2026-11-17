@@ -18,6 +18,7 @@ import threading
 import time
 import urllib.request
 import uuid
+import zipfile
 import webbrowser
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -55,7 +56,16 @@ DEFAULTS = {
     "hashtags": "#twitch #clips #fyp",
     "notify_sound": True, "discord_webhook": "",
     "ai_key": "", "ai_model": "claude-haiku-5-5",
+    "logo_path": "", "logo_pos": "tr",
+    "censor_words": "kurw,chuj,pierd,jeb,fuck,shit",   # poczatki slow do wyciszenia
+    "highlight_words": "", "kw_color": "#FF4D9D",
+    "silence_gap": 2.5,       # przerwy bez mowy dluzsze niz tyle sekund sa wycinane
+    "audio_db": 8.0,          # o ile dB glosniej niz zwykle, zeby zrobic klip
+    "auto_delete_below": 0,   # klipy z ocena ponizej tej wartosci sa kasowane (0 = wylaczone)
 }
+# opcje wlaczane osobno dla kazdego kanalu
+CH_OPTS = {"facecam": False, "cam": [2, 68, 26, 30], "title_bar": False, "progress": False, "logo": False,
+           "censor": False, "cut_silence": False, "highlight": False, "loudnorm": True, "audio_trigger": False}
 MASK = "\u2022" * 8
 PAD_PRE, PAD_POST = 6, 4     # zapas w zrodle klipu, zeby dalo sie go wydluzyc w Edytorze
 
@@ -80,6 +90,19 @@ def probe_duration(path):
         return float(r.stdout.strip())
     except Exception:
         return None
+
+
+def norm_word(w):
+    return re.sub(r"[^\w]", "", str(w).lower())
+
+
+def word_roots(text):
+    return [r for r in (norm_word(x) for x in str(text).split(",")) if len(r) >= 2]
+
+
+def hits(word, roots):
+    n = norm_word(word)
+    return bool(n) and any(n.startswith(r) for r in roots)
 
 
 def parse_channel(text):
@@ -137,28 +160,32 @@ def ass_color(hex_color, default):
     return "%s%s%s" % (m.group(3), m.group(2), m.group(1))
 
 
-def build_ass(words, s, offset, dur):
-    """Napisy ASS dla fragmentu [offset, offset+dur]; words = [[start, end, tekst], ...]."""
-    words = [(w[0] - offset, w[1] - offset, w[2].strip()) for w in words
-             if w[2].strip() and offset - 0.05 <= w[0] < offset + dur]
-    if not words:
+def build_ass(words, s, dur, title="", censor=(), marked=()):
+    """Napisy ASS. words = [(start, end, tekst)] w czasie klipu; title = naglowek na gorze."""
+    if not words and not title:
         return ""
     pos = s["cap_pos"]
-    align, margin = (8, 260) if pos == "top" else (5, 0) if pos == "middle" else (2, 430 if s["layout"] == "blur" else 330)
+    align, margin = (8, 400 if title else 260) if pos == "top" else (5, 0) if pos == "middle" else (
+        2, 430 if s["layout"] == "blur" else 330)
     font = re.sub(r"[^\w \-]", "", str(s["cap_font"])) or "Arial"
     size = max(30, min(200, int(s["cap_size"])))
     base, hi = ass_color(s["cap_color"], "#FFFFFF"), ass_color(s["cap_highlight"], "#FFE600")
+    kw = ass_color(s["kw_color"], "#FF4D9D")
+    fmt = ("Style: %s,%s,%d,&H00%s,&H00%s,%s,&H80000000,-1,0,0,0,100,100,0,0,%d,%d,%d,%d,60,60,%d,1\n")
     head = (
         "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 0\n\n"
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        "Style: Cap,%s,%d,&H00%s,&H00%s,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,7,2,%d,60,60,%d,1\n\n"
-        "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
-        % (font, size, base, base, align, margin)
+        + fmt % ("Cap", font, size, base, base, "&H00000000", 1, 7, 2, align, margin)
+        + fmt % ("Head", font, 58, "FFFFFF", "FFFFFF", "&H50140B07", 3, 14, 0, 8, 110)
+        + "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
-    n = max(1, min(8, int(s["cap_words"])))
+    clean = lambda t: t.replace("{", "(").replace("}", ")").replace("\\", "").replace("\n", " ")
     lines = []
+    if title:
+        lines.append("Dialogue: 1,%s,%s,Head,,0,0,0,,%s" % (ass_time(0), ass_time(dur), clean(title)))
+    n = max(1, min(8, int(s["cap_words"])))
     for i in range(0, len(words), n):
         group = words[i:i + n]
         for j, (start, end, _) in enumerate(group):
@@ -169,17 +196,22 @@ def build_ass(words, s, offset, dur):
                 stop = start + 0.15
             parts = []
             for k, (_, _, txt) in enumerate(group):
-                txt = (txt.upper() if s["cap_upper"] else txt).replace("{", "(").replace("}", ")").replace("\\", "")
-                parts.append("{\\c&H%s&}%s{\\c&H%s&}" % (hi, txt, base) if k == j else txt)
+                color = hi if k == j else kw if hits(txt, marked) else base
+                if hits(txt, censor):
+                    txt = txt[:1] + "*" * max(1, len(txt) - 1)
+                txt = clean(txt.upper() if s["cap_upper"] else txt)
+                parts.append(txt if color == base else "{\\c&H%s&}%s{\\c&H%s&}" % (color, txt, base))
             lines.append("Dialogue: 0,%s,%s,Cap,,0,0,0,,%s" % (ass_time(start), ass_time(stop), " ".join(parts)))
     return head + "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------- ocena klipu
-def mean_volume(path):
+def mean_volume(path, start=None, length=None):
     ff = which("ffmpeg")
     try:
-        r = run([ff, "-hide_banner", "-i", str(path), "-vn", "-af", "volumedetect", "-f", "null", "-"], timeout=120)
+        seek = ["-ss", "%.2f" % start, "-t", "%.2f" % length] if start is not None else []
+        r = run([ff, "-hide_banner", *seek, "-i", str(path), "-vn", "-af", "volumedetect", "-f", "null", "-"],
+                timeout=120)
         return float(re.search(r"mean_volume:\s*(-?[\d.]+) dB", r.stderr).group(1))
     except Exception:
         return None
@@ -200,6 +232,8 @@ def local_score(clip, words, dur, loud, s):
             tips.append("Czat zareagował słabo (%.1f× średniej). Podnieś czułość w Ustawieniach, żeby łapać tylko mocniejsze momenty." % ratio)
     elif reason == "słowa-wyzwalacze":
         add("Reakcja czatu", 25 * peak / max(1, 2 * s["keyword_hits"]), 25)
+    elif reason == "skok głośności":
+        add("Reakcja czatu", 25 * peak / 15, 25)
     else:
         add("Reakcja czatu", 12, 25)
         tips.append("Klip ręczny: brak danych z czatu, więc ta część oceny jest neutralna.")
@@ -282,9 +316,12 @@ def ai_review(clip, s):
 
 # ---------------------------------------------------------------- kanal
 class Channel:
-    def __init__(self, app, name, enabled=True):
+    def __init__(self, app, name, enabled=True, opts=None):
         self.app, self.name, self.enabled = app, name, enabled
-        self.state = "stopped"          # stopped | waiting | live
+        self.opts = {**CH_OPTS, **{k: v for k, v in (opts or {}).items() if k in CH_OPTS}}
+        self.vol = deque(maxlen=30)     # glosnosc kolejnych okien (dB)
+        self.vol_next = 0.0
+        self.state = "stopped"          # stopped | paused | waiting | live
         self.chat_ok = False
         self.chat_err = False
         self.hist = deque(maxlen=60)    # wiadomosci na okno
@@ -305,6 +342,9 @@ class Channel:
     def start(self):
         self.enabled = True
         self.gen += 1
+        if self.app.paused:
+            self.state = "paused"
+            return
         self.state = "waiting"
         threading.Thread(target=self._chat, args=(self.gen,), daemon=True).start()
         threading.Thread(target=self._record, args=(self.gen,), daemon=True).start()
@@ -316,6 +356,29 @@ class Channel:
         p = self.proc
         if p and p.poll() is None:
             p.terminate()
+
+    def halt(self):
+        """Pauza: zatrzymuje nagrywanie i czat, ale kanal zostaje wlaczony."""
+        self.gen += 1
+        self.state = "paused"
+        p = self.proc
+        if p and p.poll() is None:
+            p.terminate()
+
+    def check_volume(self, path):
+        s = self.app.settings
+        step = s["bucket_sec"]
+        pos = probe_duration(path)
+        if not pos or pos < step:
+            return
+        v = mean_volume(path, pos - step, step)
+        if v is None:
+            return
+        base = sorted(self.vol)[len(self.vol) // 2] if len(self.vol) >= 6 else None
+        self.vol.append(v)
+        if (base is not None and v - base >= s["audio_db"] and s["auto_clip"]
+                and time.time() - self.last_clip >= s["cooldown_sec"]):
+            self.trigger("skok głośności", int(round(v - base)))
 
     # --- czat: anonimowe polaczenie tylko do odczytu, bez logowania
     def _chat(self, g):
@@ -400,7 +463,7 @@ class Channel:
         t_in = start - raw_start
         clip = {"id": uuid.uuid4().hex[:10], "channel": self.name, "created": time.time(), "reason": reason,
                 "peak": peak, "base": round(self.base, 1), "status": "pending", "file": None, "text": "",
-                "title": "", "tags": "", "words": [], "src": False, "rev": 0,
+                "title": "", "tags": "", "words": [], "src": False, "rev": 0, "review": "new",
                 "raw_start": round(raw_start, 2), "raw_dur": round(pos + s["post_sec"] + PAD_POST - raw_start, 2),
                 "t_in": round(t_in, 2), "t_out": round(t_in + pos - start + s["post_sec"], 2)}
         self.last_clip = time.time()
@@ -429,6 +492,9 @@ class Channel:
                 if self.state != "live" and path.exists() and path.stat().st_size > 200_000:
                     self.state, self.rec_path, self.live_since = "live", path, time.time()
                     self.app.log("%s: NA ZYWO - nagrywam" % self.name)
+                if self.state == "live" and self.opts["audio_trigger"] and time.time() >= self.vol_next:
+                    self.vol_next = time.time() + self.app.settings["bucket_sec"]
+                    self.check_volume(path)
                 time.sleep(1)
             if self.rec_path == path:
                 self.app.log("%s: stream zakonczony" % self.name)
@@ -448,6 +514,7 @@ class Channel:
         except OSError:
             pass
         return {"name": self.name, "enabled": self.enabled, "state": self.state, "chat": self.chat_ok,
+                "opts": self.opts, "vol": self.vol[-1] if self.vol else None,
                 "hist": list(self.hist), "cur": self.cur, "kw": self.kw, "thr": self.thr,
                 "live_since": self.live_since, "rec_mb": round(size / 1e6)}
 
@@ -470,6 +537,7 @@ class App:
             except Exception:
                 pass
         self.settings = {**DEFAULTS, **{k: v for k, v in cfg.get("settings", {}).items() if k in DEFAULTS}}
+        self.paused = bool(cfg.get("paused", False))
         self.refresh_kw()
         self._disk = (0, {"clips_mb": 0, "rec_mb": 0})
         self.clips = []
@@ -480,7 +548,7 @@ class App:
                 pass
         self.channels = {}
         for c in cfg.get("channels", []):
-            self.channels[c["name"]] = Channel(self, c["name"], c.get("enabled", True))
+            self.channels[c["name"]] = Channel(self, c["name"], c.get("enabled", True), c.get("opts"))
 
     def start(self):
         threading.Thread(target=self._worker, daemon=True).start()
@@ -500,8 +568,9 @@ class App:
 
     def save(self):
         with self.lock:
-            CFG.write_text(json.dumps({"settings": self.settings, "channels": [
-                {"name": c.name, "enabled": c.enabled} for c in self.channels.values()]}, indent=2), "utf-8")
+            CFG.write_text(json.dumps({"settings": self.settings, "paused": self.paused, "channels": [
+                {"name": c.name, "enabled": c.enabled, "opts": c.opts} for c in self.channels.values()]},
+                indent=2), "utf-8")
             CLIPS_DB.write_text(json.dumps(self.clips, indent=1), "utf-8")
 
     def add_clip(self, clip, rec):
@@ -537,7 +606,11 @@ class App:
                 self.render(clip)
                 clip["status"] = "ready"
                 self.log("%s: klip gotowy (%s), ocena %s" % (clip["channel"], clip["file"], clip["score"]["total"]))
-                if kind == "new":
+                low = int(self.settings["auto_delete_below"])
+                if kind == "new" and low and clip["reason"] != "ręcznie" and clip["score"]["total"] < low:
+                    self.delete_clip(clip)
+                    self.log("%s: klip skasowany automatycznie (ocena ponizej %d)" % (clip["channel"], low))
+                elif kind == "new":
                     threading.Thread(target=self.notify, args=(clip,), daemon=True).start()
             except Exception as e:
                 clip["status"] = "ready" if kind == "render" and clip.get("file") else "error"
@@ -574,35 +647,118 @@ class App:
             except Exception as e:
                 self.log("%s: napisy pominiete (%s)" % (clip["channel"], str(e)[-150:]))
 
+    def delete_clip(self, c):
+        with self.lock:
+            if c in self.clips:
+                self.clips.remove(c)
+            if c.get("file"):
+                (CLIPS / c["file"]).unlink(missing_ok=True)
+            (CLIPS / "src" / (c["id"] + ".ts")).unlink(missing_ok=True)
+
     def render(self, clip):
-        """Renderuje pionowy klip ze zrodla wg przyciecia, napisow i stylu; liczy ocene."""
+        """Renderuje pionowy klip ze zrodla: przyciecie, uklad, napisy, obrobka dzwieku; liczy ocene."""
         ff = which("ffmpeg")
         s = self.settings
         cid = clip["id"]
+        ch = self.channels.get(clip["channel"])
+        o = {**CH_OPTS, **(ch.opts if ch else clip.get("opts") or {})}
+        clip["opts"] = dict(o)
         raw, sub, tmp = "src/%s.ts" % cid, cid + ".ass", cid + "_tmp.mp4"
         if not ff or not (CLIPS / raw).exists():
             raise RuntimeError("brak zrodla klipu - nie da sie wyrenderowac ponownie")
         t_in = max(0.0, float(clip["t_in"]))
-        dur = max(1.0, float(clip["t_out"]) - t_in)
+        dur0 = max(1.0, float(clip["t_out"]) - t_in)
+        words = [(w[0] - t_in, w[1] - t_in, w[2].strip()) for w in clip.get("words") or []
+                 if w[2].strip() and t_in - 0.05 <= w[0] < t_in + dur0]
+        # wycinanie ciszy: zostaw fragmenty z mowa, usun dlugie przerwy miedzy slowami
+        segs = [(0.0, dur0)]
+        if o["cut_silence"] and len(words) > 1:
+            gap, segs, a = max(1.0, float(s["silence_gap"])), [], 0.0
+            for w1, w2 in zip(words, words[1:]):
+                if w2[0] - w1[1] > gap:
+                    segs.append((a, w1[1] + 0.4))
+                    a = w2[0] - 0.4
+            segs.append((a, dur0))
+
+        def remap(t):
+            out = 0.0
+            for a, b in segs:
+                if t <= a:
+                    break
+                out += min(t, b) - a
+            return out
+        dur = sum(b - a for a, b in segs)
+        words = [(remap(a), remap(b), t) for a, b, t in words]
+        sel = "+".join("between(t,%.2f,%.2f)" % seg for seg in segs)
+        censor = word_roots(s["censor_words"]) if o["censor"] else []
+        shown = [t[:1] + "*" * max(1, len(t) - 1) if hits(t, censor) else t for _, _, t in words]
+        if not clip.get("title"):
+            head = " ".join(shown[:7]).strip(" ,.-")
+            clip["title"] = (head[:1].upper() + head[1:] + ("..." if len(words) > 7 else "")) if head else \
+                "%s: moment, który rozgrzał czat" % clip["channel"]
+        if not clip.get("tags"):
+            clip["tags"] = ("#%s %s" % (clip["channel"], s["hashtags"])).strip()
+        marked = word_roots(s["highlight_words"]) if o["highlight"] else []
         out = clip.get("file") or "%s_%s_%s.mp4" % (
             clip["channel"], time.strftime("%m%d_%H%M%S", time.localtime(clip["created"])), cid)
         try:
-            ass = build_ass(clip.get("words") or [], s, t_in, dur) if s["captions"] else ""
+            ass = build_ass(words if s["captions"] else [], s, dur, clip["title"] if o["title_bar"] else "",
+                            censor, marked)
+            fc, v = [], "[0:v]"
+            if len(segs) > 1:
+                fc.append("[0:v]select='%s',setpts=N/FRAME_RATE/TB[vs]" % sel)
+                v = "[vs]"
+            if o["facecam"]:
+                x, y, w, h = [max(0.0, min(100.0, float(n))) for n in (list(o["cam"]) + [0, 0, 30, 30])[:4]]
+                w, h = max(5.0, min(w, 100 - x)), max(5.0, min(h, 100 - y))
+                fc.append("%ssplit[c][g];[c]crop=iw*%g/100:ih*%g/100:iw*%g/100:ih*%g/100,"
+                          "scale=1080:760:force_original_aspect_ratio=increase,crop=1080:760[cam];"
+                          "[g]scale=1080:1160:force_original_aspect_ratio=increase,crop=1080:1160[game];"
+                          "[cam][game]vstack,setsar=1[v1]" % (v, w, h, x, y))
+            elif s["layout"] == "crop":
+                fc.append("%sscale=-2:1920,crop=1080:1920,setsar=1[v1]" % v)
+            else:
+                fc.append("%ssplit[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
+                          "boxblur=24:4[bg];[b]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v1]" % v)
+            v = "[v1]"
+            inputs = ["-ss", "%.2f" % t_in, "-t", "%.2f" % dur0, "-i", raw]
+            logo = Path(str(s["logo_path"]).strip().strip('"'))
+            if o["logo"] and logo.is_file() and logo.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+                inputs += ["-i", str(logo)]
+                top = 250 if o["title_bar"] else 60      # pod naglowkiem, jesli jest wlaczony
+                where = {"tl": "40:%d" % top, "br": "W-w-40:H-h-70", "bl": "40:H-h-70"}.get(
+                    s["logo_pos"], "W-w-40:%d" % top)
+                fc.append("[1:v]scale=200:-1[lg];%s[lg]overlay=%s[v2]" % (v, where))
+                v = "[v2]"
+            elif o["logo"]:
+                self.log("%s: logo pominiete - ustaw sciezke do pliku PNG w Ustawieniach" % clip["channel"])
+            if o["progress"]:
+                fc.append("color=c=0x%s:s=1080x12:r=30:d=%.2f[pb];%s[pb]overlay=x='-1080+1080*t/%.2f':y=H-12:"
+                          "shortest=1[v3]" % (str(s["cap_highlight"]).lstrip("#")[:6] or "FFE600", dur + 2, v, dur))
+                v = "[v3]"
             if ass:
                 (CLIPS / sub).write_text(ass, "utf-8")
-            if s["layout"] == "crop":
-                vf = "[0:v]scale=-2:1920,crop=1080:1920,setsar=1[v]"
-            else:
-                vf = ("[0:v]split[a][b];[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-                      "boxblur=24:4[bg];[b]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]")
-            if ass:
-                vf += ";[v]subtitles=%s[o]" % sub
-            r = run([ff, "-y", "-v", "error", "-ss", str(t_in), "-t", str(dur), "-i", raw, "-filter_complex", vf,
-                     "-map", "[o]" if ass else "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast",
-                     "-crf", "21", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart",
-                     tmp], cwd=CLIPS)
+                fc.append("%ssubtitles=%s[v4]" % (v, sub))
+                v = "[v4]"
+            fp = which("ffprobe")
+            has_audio = bool(fp and run([fp, "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+                                         "-of", "csv=p=0", raw], cwd=CLIPS, timeout=30).stdout.strip())
+            amap = []
+            if has_audio:
+                af = ["aselect='%s',asetpts=N/SR/TB" % sel] if len(segs) > 1 else []
+                mutes = ["between(t,%.2f,%.2f)" % (a - 0.05, b + 0.05) for a, b, t in words if hits(t, censor)]
+                if mutes:
+                    af.append("volume=enable='%s':volume=0" % "+".join(mutes))
+                if o["loudnorm"]:
+                    af.append("loudnorm=I=-14:TP=-1.5:LRA=11")
+                if af:
+                    fc.append("[0:a]%s[a]" % ",".join(af))
+                amap = ["-map", "[a]" if af else "0:a", "-c:a", "aac", "-b:a", "160k", "-ar", "48000"]
+            r = run([ff, "-y", "-v", "error", *inputs, "-filter_complex", ";".join(fc), "-map", v, *amap,
+                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p",
+                     "-movflags", "+faststart", tmp], cwd=CLIPS)
             if r.returncode or not (CLIPS / tmp).exists():
-                raise RuntimeError("render nie powiodl sie: " + r.stderr[-200:])
+                raise RuntimeError("render nie powiodl sie: " + r.stderr[-300:])
             os.replace(CLIPS / tmp, CLIPS / out)
         finally:
             for f in (sub, tmp):
@@ -610,20 +766,28 @@ class App:
                     (CLIPS / f).unlink(missing_ok=True)
                 except OSError:
                     pass
-        vis = [(w[0] - t_in, w[1] - t_in, w[2]) for w in clip.get("words") or []
-               if w[2].strip() and t_in - 0.05 <= w[0] < t_in + dur]
         clip.update(file=out, rev=clip.get("rev", 0) + 1, len=round(dur, 1),
-                    text=" ".join(w[2] for w in vis)[:200])
-        clip["score"] = local_score(clip, vis, dur, mean_volume(CLIPS / out), s)
-        if not clip.get("title"):
-            head = " ".join(w[2] for w in vis[:7]).strip(" ,.-")
-            clip["title"] = (head[:1].upper() + head[1:] + ("..." if len(vis) > 7 else "")) if head else \
-                "%s: moment, który rozgrzał czat" % clip["channel"]
-        if not clip.get("tags"):
-            clip["tags"] = ("#%s %s" % (clip["channel"], s["hashtags"])).strip()
+                    text=" ".join(shown)[:200])
+        clip["score"] = local_score(clip, words, dur, mean_volume(CLIPS / out), s)
         if not s["keep_sources"]:
             (CLIPS / raw).unlink(missing_ok=True)
             clip["src"] = False
+
+    def export_zip(self):
+        """Paczka ZIP z zatwierdzonymi klipami i plikiem z opisami."""
+        with self.lock:
+            picked = [c for c in self.clips if c["status"] == "ready" and c.get("review") == "ok" and c.get("file")]
+        if not picked:
+            return None
+        path = DATA / "clipper_export.zip"
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as z:
+            notes = []
+            for c in picked:
+                if (CLIPS / c["file"]).is_file():
+                    z.write(CLIPS / c["file"], c["file"])
+                    notes.append("%s\n%s\n%s\n" % (c["file"], c.get("title", ""), c.get("tags", "")))
+            z.writestr("opisy.txt", "\n".join(notes))
+        return path
 
     def notify(self, clip):
         url = str(self.settings["discord_webhook"]).strip()
@@ -655,6 +819,8 @@ class App:
                 "clips": self.clips[:200],
                 "settings": {**self.settings, "ai_key": MASK if self.settings["ai_key"] else ""},
                 "disk": self.disk(),
+                "paused": self.paused,
+                "queue": sum(1 for c in self.clips if c["status"] in ("pending", "processing")),
                 "logs": list(self.logs)[-40:],
                 "deps": {"ffmpeg": bool(which("ffmpeg") and which("ffprobe")), "whisper": whisper_available()},
                 "now": time.time(),
@@ -678,18 +844,39 @@ class App:
             ch = self.channels.get(body.get("name"))
             if ch:
                 ch.start() if body.get("enabled") else ch.stop()
+        elif path == "/api/pause":
+            self.paused = bool(body.get("paused"))
+            for ch in self.channels.values():
+                if ch.enabled:
+                    ch.halt() if self.paused else ch.start()
+            self.log("Clipper wstrzymany" if self.paused else "Clipper wznowiony")
+        elif path == "/api/channels/options":
+            ch = self.channels.get(body.get("name"))
+            if not ch:
+                return {"error": "Nie ma takiego kanału"}
+            for k, v in (body.get("opts") or {}).items():
+                if k == "cam":
+                    try:
+                        ch.opts["cam"] = [max(0.0, min(100.0, float(n))) for n in v][:4]
+                    except (TypeError, ValueError):
+                        pass
+                elif k in CH_OPTS:
+                    ch.opts[k] = bool(v)
+        elif path == "/api/clips/review":
+            c = next((c for c in self.clips if c["id"] == body.get("id")), None)
+            if c and c["status"] == "ready":
+                if body.get("ok"):
+                    c["review"] = "ok"
+                else:
+                    self.delete_clip(c)
         elif path == "/api/clip":
             ch = self.channels.get(body.get("name"))
             if not ch or not ch.trigger("ręcznie"):
                 return {"error": "Kanał nie jest teraz na żywo"}
         elif path == "/api/clips/delete":
-            with self.lock:
-                for c in [c for c in self.clips if c["id"] == body.get("id")]:
-                    if c["status"] in ("ready", "error"):
-                        self.clips.remove(c)
-                        if c.get("file"):
-                            (CLIPS / c["file"]).unlink(missing_ok=True)
-                        (CLIPS / "src" / (c["id"] + ".ts")).unlink(missing_ok=True)
+            for c in [c for c in self.clips if c["id"] == body.get("id")]:
+                if c["status"] in ("ready", "error"):
+                    self.delete_clip(c)
         elif path == "/api/clips/update":
             c = next((c for c in self.clips if c["id"] == body.get("id")), None)
             if not c or c["status"] != "ready":
@@ -739,6 +926,7 @@ class App:
                         self.settings[k] = bool(v) if isinstance(d, bool) else type(d)(v)
                     except (TypeError, ValueError):
                         pass
+            self.settings["auto_delete_below"] = max(0, min(100, self.settings["auto_delete_below"]))
             for k in ("bucket_sec", "window_buckets", "pre_sec", "post_sec", "keyword_hits", "cap_words"):
                 self.settings[k] = max(1, self.settings[k])
             self.refresh_kw()
@@ -770,6 +958,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, (BASE / "panel.html").read_bytes(), "text/html; charset=utf-8")
         if path == "/api/state":
             return self._send(200, self.app.state())
+        if path == "/api/export.zip":
+            z = self.app.export_zip()
+            if not z:
+                return self._send(404, {"error": "Najpierw zatwierdź klipy"})
+            return self._file(z, "clipper_klipy.zip")
         if path.startswith("/clips/"):
             name = os.path.basename(path)
             f = CLIPS / name
@@ -778,7 +971,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(f)
         self._send(404, {"error": "nie znaleziono"})
 
-    def _file(self, f):
+    def _file(self, f, download=None):
         size = f.stat().st_size
         start, end = 0, size - 1
         m = re.match(r"bytes=(\d*)-(\d*)", self.headers.get("Range") or "")
@@ -796,6 +989,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
         self.send_header("Content-Type", mimetypes.guess_type(f.name)[0] or "video/mp4")
         self.send_header("Accept-Ranges", "bytes")
+        if download:
+            self.send_header("Content-Disposition", 'attachment; filename="%s"' % download)
         self.send_header("Content-Length", str(end - start + 1))
         self.end_headers()
         try:

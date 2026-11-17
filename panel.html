@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clipper</title>
 <style>
-:root{--ink:#070b14;--panel:rgba(14,21,36,.78);--edge:rgba(88,230,255,.16);--text:#dfe9f7;--sub:#7f8da8;
+:root{--ink:#070b14;--panel:rgba(14,21,36,.64);--edge:rgba(88,230,255,.16);--text:#dfe9f7;--sub:#7f8da8;
 --cyan:#58e6ff;--violet:#8f7bff;--hot:#ff4d9d;--mint:#7dffb0;--amber:#ffc65c;--fill:rgba(127,141,168,.14);
 --head:"Bahnschrift","DIN Alternate","Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;
 --body:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif}
@@ -48,6 +48,12 @@ input,select,textarea{font:inherit;color:var(--text);background:rgba(7,11,20,.7)
 input[type=color]{padding:2px;width:46px;height:34px}input[type=range]{padding:0;border:0;background:none;accent-color:var(--cyan);width:100%}
 .name{font:600 18px var(--head);letter-spacing:.3px;overflow:hidden;text-overflow:ellipsis}
 .dot{width:10px;height:10px;border-radius:50%;background:#3a4560;flex:none}
+dialog{border:1px solid var(--edge);background:#0b111e;color:var(--text);padding:20px;width:min(520px,94vw);max-height:90vh}
+dialog::backdrop{background:rgba(3,6,12,.7);backdrop-filter:blur(4px)}
+.status{margin:0 4px 14px;padding:12px;border:1px solid var(--edge);font-size:13px;color:var(--sub);line-height:1.7}
+.status b{color:var(--text)}.status button{width:100%;margin-top:8px;text-align:center}
+.tag{font-size:11px;padding:1px 7px;border:1px solid currentColor;color:var(--amber)}.tag.ok{color:var(--mint)}
+.dot.paused{background:var(--violet)}
 .dot.live{background:var(--hot);box-shadow:0 0 12px var(--hot);animation:pulse 1.4s infinite}.dot.waiting{background:var(--amber)}
 @keyframes pulse{50%{opacity:.35}}
 .chart{position:relative;height:64px;display:flex;align-items:flex-end;gap:2px;margin:14px 0 10px}
@@ -85,7 +91,7 @@ ul.tips{padding-left:18px;margin:6px 0}ul.tips li{margin:5px 0}
 .toast{position:fixed;right:22px;bottom:22px;z-index:5;background:var(--panel);border:1px solid var(--cyan);padding:10px 16px;opacity:0;transform:translateY(8px);transition:.25s;pointer-events:none}
 .toast.on{opacity:1;transform:none}
 @media(max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:auto 1fr}nav{flex-direction:row;overflow:auto;padding:8px;border-right:0;border-bottom:1px solid var(--edge)}
-.brand,nav .foot{display:none}nav button{border-left:0;white-space:nowrap}main{padding:18px 14px 50px}.split{grid-template-columns:1fr}}
+.brand,nav .foot,.status{display:none}nav button{border-left:0;white-space:nowrap}main{padding:18px 14px 50px}.split{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -95,12 +101,13 @@ ul.tips{padding-left:18px;margin:6px 0}ul.tips li{margin:5px 0}
   <nav id="nav"></nav>
   <main id="view"></main>
 </div>
+<dialog id="chdlg"></dialog>
 <div class="toast" id="toast"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let S = null, view = ['monitor','clips','rating','editor','stats','settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'new'}, aiBusy = false;
+let S = null, view = ['monitor','clips','rating','editor','stats','settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'new', rev: ''}, aiBusy = false;
 const VIEWS = [['channels', 'Kanały'], ['monitor', 'Monitor'], ['clips', 'Klipy'], ['rating', 'Ocena'], ['editor', 'Edytor'], ['stats', 'Statystyki'], ['settings', 'Ustawienia']];
 
 async function post(path, body, quiet) {
@@ -126,9 +133,13 @@ const clip = id => S.clips.find(c => c.id === id);
 function go(v, id) { view = v; if (id) sel = id; sig = ''; drawNav(); draw(true); $('view').scrollTop = 0; }
 function drawNav() {
   const live = S ? S.channels.filter(c => c.state === 'live').length : 0;
-  $('nav').innerHTML = '<div class="brand"><i></i>Clipper</div>' + VIEWS.map(([k, t]) =>
-    `<button class="${k === view ? 'on' : ''}" onclick="go('${k}')">${t}${k === 'channels' && live ? `<span class="n">${live}</span>` : ''}</button>`).join('') +
-    `<div class="foot">${S ? `Kanały na żywo: ${live}<br>Gotowe klipy: ${ready().length}` : ''}</div>`;
+  const last = S && S.clips.find(c => c.status === 'ready');
+  $('nav').innerHTML = '<div class="brand"><i></i>Clipper</div>' + (S ? `<div class="status">
+      Stan: <b style="color:${S.paused ? 'var(--violet)' : 'var(--mint)'}">${S.paused ? 'wstrzymany' : 'działa'}</b><br>
+      Na żywo: <b>${live} z ${S.channels.length}</b><br>W kolejce: <b>${S.queue}</b><br>Ostatni klip: <b>${last ? when(last.created) : 'brak'}</b>
+      <button class="b ${S.paused ? 'go' : ''}" onclick="post('/api/pause',{paused:${!S.paused}})">${S.paused ? 'Start' : 'Pauza'}</button></div>` : '') +
+    VIEWS.map(([k, t]) => { const n = k === 'channels' ? live : k === 'clips' && S ? ready().filter(c => c.review === 'new').length : 0;
+      return `<button class="${k === view ? 'on' : ''}" onclick="go('${k}')">${t}${n ? `<span class="n">${n}</span>` : ''}</button>`; }).join('');
 }
 
 /* ---------- widoki ---------- */
@@ -137,7 +148,7 @@ function bars(c, n) {
   return h.map(v => `<i class="${c.thr && v >= c.thr ? 'hot' : ''}" style="height:${v / max * 100}%"></i>`).join('') +
     (c.thr ? `<div class="thr" style="bottom:${c.thr / max * 100}%"></div>` : '');
 }
-const statusText = c => c.state === 'live' ? `Na żywo od ${dur(S.now - c.live_since)}, nagranie ${c.rec_mb} MB` : c.state === 'waiting' ? 'Offline, czekam na stream' : 'Wyłączony';
+const statusText = c => c.state === 'live' ? `Na żywo od ${dur(S.now - c.live_since)}, nagranie ${c.rec_mb} MB` : c.state === 'waiting' ? 'Offline, czekam na stream' : c.state === 'paused' ? 'Wstrzymany' : 'Wyłączony';
 const sw = (on, click, label) => `<button class="sw ${on ? 'on' : ''}" aria-label="${label}" onclick="${click}"></button>`;
 
 function vChannels() {
@@ -154,9 +165,31 @@ function vChannels() {
     <div class="chart">${bars(c, 30)}</div>
     <div class="row"><div class="sub grow">${c.enabled ? (c.chat ? `${last} wiad. w oknie` + (c.thr ? `, próg ${Math.round(c.thr)}` : ', zbieram średnią') : 'Łączę z czatem…') : ''}</div>
       <button class="b" ${c.state === 'live' ? '' : 'disabled'} onclick="post('/api/clip',{name:'${c.name}'})">Klip teraz</button>
+      <button class="b" onclick="chOpts('${c.name}')">Opcje</button>
       <button class="link bad" onclick="if(confirm('Usunąć kanał ${c.name}?'))post('/api/channels/remove',{name:'${c.name}'})">Usuń</button></div></div>`; }).join('') ||
     '<div class="empty">Nie obserwujesz jeszcze żadnego kanału. Wpisz nazwę powyżej.</div>'}</div>
   <h2>Dziennik</h2><div class="card log" id="log">${esc(S.logs.map(l => new Date(l[0] * 1000).toLocaleTimeString('pl-PL') + '  ' + l[1]).join('\n') || 'Brak zdarzeń.')}</div>`;
+}
+
+const CH_FIELDS = [['facecam', 'Układ z kamerką (kamerka u góry, gra na dole)'], ['title_bar', 'Nagłówek z tytułem klipu'], ['progress', 'Pasek postępu'],
+  ['logo', 'Logo / znak wodny'], ['censor', 'Cenzura przekleństw'], ['cut_silence', 'Wycinanie ciszy'], ['highlight', 'Wyróżnianie słów kluczowych'],
+  ['loudnorm', 'Wyrównanie głośności'], ['audio_trigger', 'Klip także przy skoku głośności']];
+const CAMS = {'Lewy dół': [2, 68, 26, 30], 'Prawy dół': [72, 68, 26, 30], 'Lewy górny': [2, 2, 26, 30], 'Prawy górny': [72, 2, 26, 30]};
+function chOpts(name) {
+  const c = S.channels.find(x => x.name === name), o = c.opts, d = $('chdlg');
+  d.innerHTML = `<div class="row"><div class="name grow">Opcje kanału ${esc(name)}</div><button class="link" onclick="chdlg.close()">Zamknij</button></div>
+    <p class="sub" style="margin:6px 0 10px">Dotyczą nowych klipów z tego kanału i ponownego renderu w Edytorze. Listy słów i logo ustawiasz w Ustawieniach.</p>
+    ${CH_FIELDS.map(([k, t]) => `<div class="field"><span>${t}</span><button type="button" class="sw ${o[k] ? 'on' : ''}" data-o="${k}" aria-label="${t}" onclick="this.classList.toggle('on')"></button></div>`).join('')}
+    <h2>Obszar kamerki na streamie (w % obrazu)</h2>
+    <div class="row wrap"><select onchange="if(this.value)CAMS[this.value].forEach((v,i)=>document.querySelectorAll('#chdlg [data-cam]')[i].value=v)"><option value="">Szybki wybór…</option>${Object.keys(CAMS).map(k => `<option>${k}</option>`).join('')}</select>
+      ${['Od lewej', 'Od góry', 'Szerokość', 'Wysokość'].map((t, i) => `<label class="sub">${t}<br><input type="number" min="0" max="100" style="width:76px" data-cam value="${o.cam[i]}"></label>`).join('')}</div>
+    <div class="row" style="margin-top:16px"><span class="grow"></span><button class="b go" onclick="saveCh('${name}')">Zapisz opcje</button></div>`;
+  d.showModal();
+}
+async function saveCh(name) {
+  const opts = {cam: [...document.querySelectorAll('#chdlg [data-cam]')].map(i => +i.value)};
+  document.querySelectorAll('#chdlg [data-o]').forEach(b => { opts[b.dataset.o] = b.classList.contains('on'); });
+  const r = await post('/api/channels/options', {name, opts}); $('chdlg').close(); if (!r.error) toast('Zapisano opcje kanału');
 }
 
 function vMonitor() {
@@ -167,6 +200,7 @@ function vMonitor() {
     <div class="row wrap" style="gap:22px"><div><b class="num" style="font-size:26px">${last}</b><div class="sub">wiad. w oknie</div></div>
       <div><b class="num" style="font-size:26px">${c.thr ? Math.round(c.thr) : '–'}</b><div class="sub">próg</div></div>
       <div><b class="num" style="font-size:26px">${c.kw}</b><div class="sub">słowa-wyzwalacze</div></div>
+      ${c.opts.audio_trigger ? `<div><b class="num" style="font-size:26px">${c.vol == null ? '–' : Math.round(c.vol)}</b><div class="sub">głośność dB</div></div>` : ''}
       <span class="grow"></span><button class="b" ${c.state === 'live' ? '' : 'disabled'} onclick="post('/api/clip',{name:'${c.name}'})">Klip teraz</button></div></div>`; }).join('') ||
     '<div class="empty">Dodaj kanał w zakładce Kanały, żeby zobaczyć jego czat.</div>'}</div>`;
 }
@@ -176,22 +210,29 @@ function clipCard(c) {
   const body = c.status === 'ready' ? `<video src="${src(c)}#t=0.5" controls preload="metadata" playsinline></video>`
     : `<div class="ph">${c.status === 'error' ? 'Nie udało się: ' + esc(c.error || '') : c.status === 'processing' ? 'Renderuję…' : 'Czekam na dalszy ciąg…'}</div>`;
   return `<div class="card clip">${body}${sc != null && c.status === 'ready' ? `<span class="badge ${cls(sc)}">${sc}</span>` : ''}<div class="meta">
-    <div class="t" title="${esc(c.title)}">${esc(c.title || c.channel)}</div><div class="sub">${esc(c.channel)}, ${when(c.created)}, ${esc(c.reason)}</div>
+    <div class="t" title="${esc(c.title)}">${esc(c.title || c.channel)}</div>
+    ${c.status === 'ready' ? `<span class="tag ${c.review === 'ok' ? 'ok' : ''}">${c.review === 'ok' ? 'zatwierdzony' : 'do przejrzenia'}</span>` : ''}<div class="sub">${esc(c.channel)}, ${when(c.created)}, ${esc(c.reason)}</div>
+    ${c.status === 'ready' && c.review !== 'ok' ? `<div class="row" style="margin-top:8px"><button class="b go grow" onclick="post('/api/clips/review',{id:'${c.id}',ok:true})">Zatwierdź</button>
+      <button class="b bad grow" onclick="post('/api/clips/review',{id:'${c.id}',ok:false})">Odrzuć</button></div>` : ''}
     <div class="row wrap" style="margin-top:8px;gap:12px">${c.status === 'ready' ? `<button class="link" onclick="go('rating','${c.id}')">Ocena</button>
       ${c.src ? `<button class="link" onclick="go('editor','${c.id}')">Edytuj</button>` : ''}<a class="link" href="${src(c)}" download="${esc(c.file)}">Pobierz</a>
       <button class="link" onclick="copyDesc('${c.id}')">Kopiuj opis</button>` : ''}
       ${c.status === 'ready' || c.status === 'error' ? `<button class="link bad" onclick="if(confirm('Usunąć ten klip?'))post('/api/clips/delete',{id:'${c.id}'})">Usuń</button>` : ''}</div></div></div>`;
 }
 function vClips() {
-  let list = S.clips.filter(c => !filt.ch || c.channel === filt.ch);
+  let list = S.clips.filter(c => (!filt.ch || c.channel === filt.ch) && (!filt.rev || (filt.rev === 'ok' ? c.review === 'ok' : c.review !== 'ok')));
   if (filt.sort === 'score') list = [...list].sort((a, b) => (total(b) ?? -1) - (total(a) ?? -1));
   const chans = [...new Set(S.clips.map(c => c.channel))];
   return `<div class="row wrap"><h1 class="grow">Klipy</h1>
     <select onchange="filt.ch=this.value;sig='';draw(true)"><option value="">Wszystkie kanały</option>${chans.map(n => `<option ${n === filt.ch ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+    <select onchange="filt.rev=this.value;sig='';draw(true)"><option value="">Wszystkie</option><option value="new" ${filt.rev === 'new' ? 'selected' : ''}>Do przejrzenia</option><option value="ok" ${filt.rev === 'ok' ? 'selected' : ''}>Zatwierdzone</option></select>
     <select onchange="filt.sort=this.value;sig='';draw(true)"><option value="new">Najnowsze</option><option value="score" ${filt.sort === 'score' ? 'selected' : ''}>Najwyżej ocenione</option></select>
+    <button class="b" onclick="zip()">Pobierz zatwierdzone (ZIP)</button>
     <button class="b" onclick="post('/api/open-folder',{})">Otwórz folder</button></div>
   <div class="clips" style="margin-top:16px">${list.map(clipCard).join('') || '<div class="empty">Klipy pojawią się tutaj, gdy czat na którymś kanale wybuchnie.</div>'}</div>`;
 }
+function zip() { if (!ready().some(c => c.review === 'ok')) return toast('Najpierw zatwierdź przynajmniej jeden klip');
+  const a = document.createElement('a'); a.href = '/api/export.zip'; a.download = 'clipper_klipy.zip'; document.body.append(a); a.click(); a.remove(); }
 function copyDesc(id) { const c = clip(id), t = (c.title || '') + '\n' + (c.tags || '');
   (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Skopiowano opis'), () => {
     const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); toast('Skopiowano opis'); }); }
@@ -295,6 +336,11 @@ const FIELDS = [
     ['cap_color', 'Kolor tekstu', 'color'], ['cap_highlight', 'Kolor wypowiadanego słowa', 'color'],
     ['cap_pos', 'Pozycja', 'sel', [['bottom', 'Na dole'], ['middle', 'Na środku'], ['top', 'Na górze']]], ['cap_words', 'Słów na ekranie', 'num', 1], ['cap_upper', 'Wielkie litery', 'bool']]],
   ['Opis i powiadomienia', [['hashtags', 'Stałe hashtagi', 'text'], ['notify_sound', 'Dźwięk, gdy klip jest gotowy', 'bool'], ['discord_webhook', 'Webhook Discorda (opcjonalnie)', 'text']]],
+  ['Szablon i obróbka (włączasz per kanał w Opcjach)', [['logo_path', 'Ścieżka do pliku logo (PNG)', 'text'],
+    ['logo_pos', 'Pozycja logo', 'sel', [['tr', 'Prawy górny róg'], ['tl', 'Lewy górny róg'], ['br', 'Prawy dolny róg'], ['bl', 'Lewy dolny róg']]],
+    ['censor_words', 'Cenzurowane słowa (początki, po przecinku)', 'text'], ['highlight_words', 'Wyróżniane słowa (po przecinku)', 'text'],
+    ['kw_color', 'Kolor wyróżnionych słów', 'color'], ['silence_gap', 'Wycinaj ciszę dłuższą niż (s)', 'num', 0.5],
+    ['audio_db', 'Skok głośności: o ile dB ponad zwykły poziom', 'num', 1], ['auto_delete_below', 'Kasuj klipy z oceną poniżej (0 = nie kasuj)', 'num', 1]]],
   ['Ocena AI', [['ai_key', 'Klucz API Anthropic', 'pass'], ['ai_model', 'Model', 'text']]],
 ];
 function vSettings() {
@@ -318,7 +364,7 @@ const RENDER = {channels: vChannels, monitor: vMonitor, clips: vClips, rating: v
 const LIVE = {channels: 1, monitor: 1, stats: 1};       // widoki odswiezane co 2 s; pozostale tylko przy zmianie klipow
 function draw(force) {
   if (!S) return;
-  const s2 = S.clips.map(c => c.id + c.status + (c.rev || 0) + (c.title || '') + (c.ai ? 1 : 0)).join();
+  const s2 = S.clips.map(c => c.id + c.status + (c.rev || 0) + (c.title || '') + (c.ai ? 1 : 0) + (c.review || '')).join();
   if (!force && !LIVE[view] && (s2 === sig || view === 'settings' || view === 'editor')) return;
   if (!force && view === 'channels' && document.activeElement && document.activeElement.name === 'q') return;
   sig = s2;
@@ -337,29 +383,42 @@ refresh(true); setInterval(refresh, 2000);
 document.addEventListener('pointermove', e => { const c = e.target.closest && e.target.closest('.card'); if (c) { const r = c.getBoundingClientRect();
   c.style.setProperty('--mx', e.clientX - r.left + 'px'); c.style.setProperty('--my', e.clientY - r.top + 'px'); } });
 
-/* ---------- tlo: pole igiel, ktore obracaja sie i swieca przy kursorze ---------- */
+/* ---------- tlo: bonsai z bialych kropek, obraca sie z ruchem myszy ---------- */
 (() => {
-  const cv = $('bg'), g = cv.getContext('2d'), still = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let W, H, cols, rows, mx = -9999, my = -9999, t = 0, ang = [];
-  const GAP = 44;
-  function size() { const d = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * d; cv.height = H * d; g.setTransform(d, 0, 0, d, 0, 0);
-    cols = Math.ceil(W / GAP) + 1; rows = Math.ceil(H / GAP) + 1; ang = new Float32Array(cols * rows); start(); }
-  let raf = 0;
-  function start() { cancelAnimationFrame(raf); frame(); }
-  function frame() {
-    g.clearRect(0, 0, W, H); t += .006;
-    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
-      const px = x * GAP, py = y * GAP, dx = mx - px, dy = my - py, d = Math.hypot(dx, dy), near = Math.max(0, 1 - d / 260), i = y * cols + x;
-      const idle = Math.sin(px * .008 + t) + Math.cos(py * .01 - t * 1.3), target = near > 0 ? Math.atan2(dy, dx) : idle;
-      let diff = target - ang[i]; diff = Math.atan2(Math.sin(diff), Math.cos(diff)); ang[i] += diff * (near > 0 ? .18 : .04);
-      const len = 5 + near * 11, c = Math.cos(ang[i]) * len, s = Math.sin(ang[i]) * len;
-      g.strokeStyle = near > 0 ? `rgba(${88 + near * 167 | 0},${230 - near * 150 | 0},255,${.14 + near * .75})` : 'rgba(143,123,255,.22)';
-      g.lineWidth = 1 + near * 1.4; g.beginPath(); g.moveTo(px - c, py - s); g.lineTo(px + c, py + s); g.stroke();
-    }
-    if (!still && !document.hidden) raf = requestAnimationFrame(frame);
+  const cv = $('bg'), g = cv.getContext('2d');
+  let seed = 7; const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const P = [], put = (x, y, z, w) => P.push(x, y, z, w || 1);
+  const tube = (a, b, c, d, r0, r1, n) => { for (let i = 0; i < n; i++) { const t = rnd(), u = 1 - t, an = rnd() * 6.283, r = (r0 + (r1 - r0) * t) * (.75 + rnd() * .25);
+    const x = u * u * u * a[0] + 3 * u * u * t * b[0] + 3 * u * t * t * c[0] + t * t * t * d[0], y = u * u * u * a[1] + 3 * u * u * t * b[1] + 3 * u * t * t * c[1] + t * t * t * d[1],
+      z = u * u * u * a[2] + 3 * u * u * t * b[2] + 3 * u * t * t * c[2] + t * t * t * d[2]; put(x + Math.cos(an) * r, y + (rnd() - .5) * r * .4, z + Math.sin(an) * r, .8); } };
+  const pad = (cx, cy, cz, rx, ry, rz, n) => { for (let i = 0; i < n; i++) { const an = rnd() * 6.283, rr = Math.sqrt(rnd()), up = Math.pow(rnd(), .6);
+    put(cx + Math.cos(an) * rr * rx, cy + up * ry * (1 - rr * rr * .7) - rnd() * ry * .15, cz + Math.sin(an) * rr * rz, 1); } };
+  // donica
+  for (let i = 0; i < 520; i++) { const an = rnd() * 6.283, h = rnd(), r = .62 - h * .1; put(Math.cos(an) * r, -.02 - h * .26, Math.sin(an) * r * .62, .7); }
+  for (let i = 0; i < 200; i++) { const an = rnd() * 6.283, r = Math.sqrt(rnd()) * .58; put(Math.cos(an) * r, .0 + (1 - r) * .05, Math.sin(an) * r * .62, .5); }
+  // pien w ksztalcie litery S i konary
+  tube([-.05, 0, 0], [-.42, .42, .1], [.34, .62, -.12], [.06, 1.08, .02], .13, .05, 620);
+  tube([.06, 1.08, .02], [-.05, 1.28, .05], [.1, 1.42, 0], [.02, 1.52, -.02], .05, .02, 150);
+  const arms = [[[-.2, .46, .05], [-.6, .5, .2], [-.82, .62, .12], [-.98, .66, .1]], [[.2, .64, -.06], [.55, .66, -.2], [.8, .84, -.12], [.96, .88, -.1]],
+    [[.12, .9, 0], [-.2, .98, -.25], [-.45, 1.1, -.3], [-.6, 1.14, -.32]], [[.08, 1.0, .02], [.3, 1.1, .25], [.48, 1.2, .3], [.58, 1.24, .3]]];
+  arms.forEach(a => tube(a[0], a[1], a[2], a[3], .045, .015, 150));
+  // korona: plaskie "chmury" lisci
+  [[-1.0, .68, .1, .42, .2, .34, 620], [.98, .9, -.1, .4, .19, .32, 580], [-.62, 1.16, -.32, .36, .18, .3, 480], [.6, 1.26, .3, .34, .17, .28, 440],
+   [.02, 1.52, -.02, .5, .26, .4, 820], [-.3, .98, .25, .26, .13, .22, 260]].forEach(a => pad(...a));
+  const N = P.length / 4;
+  let W, H, ry = .5, rx = .12, ty = .5, tx = .12, raf = 0;
+  function size() { const d = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * d; cv.height = H * d; g.setTransform(d, 0, 0, d, 0, 0); paint(); }
+  function paint() {
+    g.clearRect(0, 0, W, H);
+    const sc = Math.min(W, H) * .4, ox = W * (W > 760 ? .58 : .5), oy = H * .8, cy = Math.cos(ry), sy = Math.sin(ry), cx = Math.cos(rx), sx = Math.sin(rx);
+    for (let i = 0; i < N; i++) { const x = P[i * 4], y = P[i * 4 + 1] - .7, z = P[i * 4 + 2], w = P[i * 4 + 3];
+      const X = x * cy + z * sy, Z = -x * sy + z * cy, Y = y * cx - Z * sx, Z2 = y * sx + Z * cx, f = 3.2 / (3.2 + Z2), d = (1.3 - Z2) / 2.6;
+      g.fillStyle = `rgba(255,255,255,${(.12 + d * .5) * w})`; const r = (1 + d * 1.6) * f;
+      g.fillRect(ox + X * sc * f - r / 2, oy - (Y + .7) * sc * f - r / 2, r, r); }
   }
-  addEventListener('resize', size); addEventListener('pointermove', e => { mx = e.clientX; my = e.clientY; });
-  addEventListener('pointerleave', () => { mx = my = -9999; }); document.addEventListener('visibilitychange', () => { if (!document.hidden && !still) start(); });
+  function loop() { ry += (ty - ry) * .07; rx += (tx - rx) * .07; paint(); raf = Math.abs(ty - ry) + Math.abs(tx - rx) > .001 ? requestAnimationFrame(loop) : 0; }
+  addEventListener('resize', size);
+  addEventListener('pointermove', e => { ty = (e.clientX / W - .5) * 3.2; tx = .12 + (e.clientY / H - .5) * .5; if (!raf) raf = requestAnimationFrame(loop); });
   size();
 })();
 </script>
