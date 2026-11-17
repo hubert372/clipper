@@ -203,7 +203,7 @@ function vChannels() {
     ${c.ai.state === 'off' ? '' : `<div class="sub" style="margin-bottom:8px;color:${c.ai.state === 'error' ? 'var(--hot)' : c.ai.state === 'done' ? 'var(--mint)' : 'var(--amber)'}">${
       c.ai.state === 'done' ? 'AI dobrało ustawienia. ' + esc(c.ai.note) : c.ai.state === 'error' ? 'AI nie dobrało ustawień: ' + esc(c.ai.note)
       : c.ai.state === 'working' ? 'AI analizuje kanał…' : 'AI czeka, aż kanał będzie na żywo i zbierze 2 minuty czatu.'}</div>`}
-    <div class="row"><div class="sub grow">${c.enabled ? (c.chat ? `${last} wiad. w oknie` + (c.thr ? `, próg ${Math.round(c.thr)}` : ', zbieram średnią') : 'Łączę z czatem…') : ''}</div>
+    <div class="row"><div class="sub grow">${c.enabled ? (c.chat ? (c.auto ? `${last} osób pisze, wynik ${c.score.toFixed(1)} z ${c.sens.toFixed(1)}` + (c.thr ? '' : ', uczę się czatu') : `${last} wiad. w oknie` + (c.thr ? `, próg ${Math.round(c.thr)}` : ', zbieram średnią')) : 'Łączę z czatem…') : ''}</div>
       <button class="b" ${c.state === 'live' ? '' : 'disabled'} onclick="post('/api/clip',{name:'${c.name}'})">Klip teraz</button>
       <button class="b" onclick="chOpts('${c.name}')">Opcje</button>
       <button class="link bad" onclick="if(confirm('Usunąć kanał ${c.name}?'))post('/api/channels/remove',{name:'${c.name}'})">Usuń</button></div></div>`; }).join('') ||
@@ -246,7 +246,9 @@ function vMonitor() {
   <div class="grid big">${S.channels.map(c => { const last = c.hist.length ? c.hist[c.hist.length - 1] : 0; return `<div class="card">
     <div class="row"><span class="dot ${c.state}"></span><div class="name grow">${esc(c.name)}</div><span class="sub">${statusText(c)}</span></div>
     <div class="chart tall">${bars(c, 60)}</div>
-    <div class="row wrap" style="gap:22px"><div><b class="num" style="font-size:26px">${last}</b><div class="sub">wiad. w oknie</div></div>
+    <div class="row wrap" style="gap:22px"><div><b class="num" style="font-size:26px">${last}</b><div class="sub">${c.auto ? 'osób pisze' : 'wiad. w oknie'}</div></div>
+      ${c.auto ? `<div><b class="num" style="font-size:26px;color:${c.score >= c.sens ? 'var(--hot)' : 'inherit'}">${c.score.toFixed(1)}</b><div class="sub">wynik momentu</div></div>
+      <div><b class="num" style="font-size:26px">${c.sens.toFixed(1)}</b><div class="sub">czułość (auto)</div></div>` : ''}
       <div><b class="num" style="font-size:26px">${c.thr ? Math.round(c.thr) : '–'}</b><div class="sub">próg</div></div>
       <div><b class="num" style="font-size:26px">${c.kw}</b><div class="sub">słowa-wyzwalacze</div></div>
       ${c.opts.audio_trigger ? `<div><b class="num" style="font-size:26px">${c.vol == null ? '–' : Math.round(c.vol)}</b><div class="sub">głośność dB</div></div>` : ''}
@@ -445,7 +447,8 @@ function vStats() {
 
 const FONTS = ['Arial', 'Arial Black', 'Impact', 'Bahnschrift', 'Segoe UI', 'Verdana', 'Comic Sans MS'];
 const FIELDS = [
-  ['Wykrywanie', [['auto_clip', 'Automatyczne klipy', 'bool'], ['multiplier', 'Czułość (ile razy więcej niż średnia czatu)', 'num', 0.1], ['min_msgs', 'Minimum wiadomości w oknie', 'num', 1],
+  ['Wykrywanie', [['auto_clip', 'Automatyczne klipy', 'bool'], ['auto_detect', 'Tryb automatyczny: dopasuj się do czatu i tempa streama', 'bool'],
+    ['target_rate', 'Ile klipów na godzinę z kanału (mniej więcej)', 'num', 1], ['multiplier', 'Czułość (ile razy więcej niż średnia czatu)', 'num', 0.1], ['min_msgs', 'Minimum wiadomości w oknie', 'num', 1],
     ['bucket_sec', 'Długość okna (s)', 'num', 1], ['cooldown_sec', 'Przerwa między klipami (s)', 'num', 1],
     ['keywords', 'Słowa-wyzwalacze (po przecinku, puste = wyłączone)', 'text'], ['keyword_hits', 'Ile wiadomości ze słowem w oknie', 'num', 1]]],
   ['Klip', [['safe_zones', 'Strefy bezpieczne TikToka, Reels i Shorts', 'bool'], ['hook_len', 'Długość klipu z haczykiem (s)', 'num', 1], ['hook_lead', 'Start: ile sekund przed reakcją czatu', 'num', 0.5],
@@ -453,7 +456,7 @@ const FIELDS = [
     ['layout', 'Kadr', 'sel', [['blur', 'Cały obraz i rozmyte tło'], ['crop', 'Przycięcie do środka']]],
     ['quality', 'Jakość nagrywania', 'sel', [['720p60,720p,best', '720p'], ['1080p60,1080p,best', '1080p'], ['best', 'Najlepsza'], ['480p,worst', '480p']]],
     ['keep_sources', 'Zachowuj źródło klipu (potrzebne w Edytorze)', 'bool'], ['keep_recordings', 'Zachowuj pełne nagrania streamów', 'bool']]],
-  ['Napisy', [['captions', 'Napisy (Whisper)', 'bool'],
+  ['Napisy', [['captions', 'Napisy (Whisper)', 'bool'], ['auto_model', 'Sam zmniejsz model, gdy komputer nie nadąża', 'bool'],
     ['whisper_model', 'Model', 'sel', [['tiny', 'tiny, najszybszy'], ['base', 'base'], ['small', 'small'], ['medium', 'medium'], ['large-v3', 'large-v3, najlepszy']]],
     ['language', 'Język (puste = wykryj sam)', 'text'], ['cap_font', 'Czcionka', 'sel', FONTS.map(f => [f, f])], ['cap_size', 'Rozmiar', 'num', 1],
     ['cap_color', 'Kolor tekstu', 'color'], ['cap_highlight', 'Kolor wypowiadanego słowa', 'color'],
@@ -465,11 +468,13 @@ const FIELDS = [
     ['kw_color', 'Kolor wyróżnionych słów', 'color'], ['silence_gap', 'Wycinaj ciszę dłuższą niż (s)', 'num', 0.5], ['game_zoom', 'Przybliżenie gry w układzie z kamerką (1 = cały obraz)', 'num', 0.05],
     ['audio_db', 'Skok głośności: o ile dB ponad zwykły poziom', 'num', 1], ['auto_delete_below', 'Kasuj klipy z oceną poniżej (0 = nie kasuj)', 'num', 1]]],
   ['AI (ocena klipów i dobór ustawień kanału)', [['ai_mode', 'Skąd AI', 'sel', [['api', 'Klucz API Anthropic'], ['cli', 'Claude Code (logowanie kontem Claude)']]],
+    ['auto_ai_tune', 'AI samo dobiera opcje każdego kanału raz na dobę', 'bool'],
     ['ai_key', 'Klucz API (tylko dla trybu z kluczem)', 'pass'], ['ai_model', 'Model (tylko dla trybu z kluczem)', 'text']]],
 ];
 // pola widoczne tylko wtedy, gdy ma to sens (np. styl napisow tylko przy wlaczonych napisach)
-const DEP = {whisper_model: 'captions', language: 'captions', cap_font: 'captions', cap_size: 'captions', cap_color: 'captions', cap_highlight: 'captions',
-  cap_pos: 'captions', cap_words: 'captions', cap_upper: 'captions', keyword_hits: 'keywords', multiplier: 'auto_clip', min_msgs: 'auto_clip',
+const DEP = {whisper_model: 'captions', auto_model: 'captions', language: 'captions', cap_font: 'captions', cap_size: 'captions', cap_color: 'captions', cap_highlight: 'captions',
+  cap_pos: 'captions', cap_words: 'captions', cap_upper: 'captions', keyword_hits: 'auto_detect=false,keywords', keywords: 'auto_detect=false', multiplier: 'auto_clip,auto_detect=false', min_msgs: 'auto_clip,auto_detect=false',
+  target_rate: 'auto_clip,auto_detect', auto_detect: 'auto_clip', bucket_sec: 'auto_detect=false',
   cooldown_sec: 'auto_clip', logo_pos: 'logo_path', kw_color: 'highlight_words', ai_mode: 'aiopen', ai_key: 'aiopen,ai_mode=api', ai_model: 'aiopen,ai_mode=api'};
 let aiEdit = false, aiTesting = false, snap = '';
 function collect() { const out = {}; document.querySelectorAll('#fields [data-k]').forEach(el => { out[el.dataset.k] = el.classList.contains('sw') ? el.classList.contains('on') : el.value; }); return out; }

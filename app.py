@@ -14,6 +14,7 @@ import re
 import shutil
 import socket
 import ssl
+import statistics
 import subprocess
 import sys
 import threading
@@ -68,6 +69,10 @@ DEFAULTS = {
     "silence_gap": 2.5,       # przerwy bez mowy dluzsze niz tyle sekund sa wycinane
     "audio_db": 8.0,          # o ile dB glosniej niz zwykle, zeby zrobic klip
     "player_volume": 1.0, "player_muted": False,   # zapamietana glosnosc odtwarzacza w panelu
+    "auto_detect": True,      # wykrywanie samo dopasowuje sie do wielkosci czatu i tempa streama
+    "target_rate": 6,         # ile klipow na godzine ma mniej wiecej powstawac z jednego kanalu
+    "auto_model": True,       # zmniejsz model napisow, jesli komputer nie nadaza
+    "auto_ai_tune": True,     # AI samo dobiera opcje kanalu raz na dobe (gdy AI jest skonfigurowane)
     "safe_zones": True,       # trzymaj napisy/tytul/logo poza interfejsem TikToka, Reels i Shorts
     "hook_len": 18,           # docelowa dlugosc klipu z haczykiem (s)
     "hook_lead": 7.0,         # ile sekund przed reakcja czatu zaczyna sie klip
@@ -511,13 +516,44 @@ def ai_tune(ch):
     return str(out.get("summary", ""))[:400]
 
 
+def find_action(path, around, dur):
+    """Szuka w dzwieku najglosniejszej chwili tuz przed reakcja czatu - to zwykle sama akcja."""
+    try:
+        import numpy as np
+        a = max(0.0, around - 14)
+        r = subprocess.run([which("ffmpeg"), "-v", "error", "-ss", "%.2f" % a, "-t", "%.2f" % (min(dur, around + 3) - a),
+                            "-i", str(path), "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
+                           capture_output=True, timeout=60, creationflags=NO_WINDOW)
+        x = np.frombuffer(r.stdout, dtype=np.int16).astype(np.float32)
+        step = 2000                                   # okna po 0,25 s
+        n = len(x) // step
+        if n < 12:
+            return None
+        rms = np.sqrt((x[:n * step].reshape(n, step) ** 2).mean(axis=1))
+        smooth = np.convolve(rms, np.ones(3) / 3, mode="same")
+        k = int(smooth.argmax())
+        if smooth[k] < 1.6 * max(1.0, float(np.median(smooth))):
+            return None                               # nic sie nie wyroznia - zostan przy domyslnym starcie
+        return round(a + k * 0.25, 2)
+    except Exception:
+        return None
+
+
 def hook_trim(clip, s):
-    """Krotki klip pod haczyk: start tuz przed akcja, ktora wywolala reakcje czatu."""
+    """Krotki klip pod haczyk: start tuz przed akcja, koniec gdy wypowiedz po akcji wybrzmi."""
     peak = clip.get("peak_at")
     if peak is None:
         return
-    t_in = max(0.0, float(peak) - float(s["hook_lead"]))
+    if clip.get("action_at") is not None:             # akcja znaleziona w dzwieku
+        t_in = max(0.0, float(clip["action_at"]) - 2.5)
+    else:
+        t_in = max(0.0, float(peak) - float(s["hook_lead"]))
     t_out = min(float(clip["raw_dur"]), t_in + max(8, min(60, int(s["hook_len"]))))
+    words = [w for w in clip.get("words") or [] if w[2].strip()]
+    ends = [a[1] for a, b in zip(words, words[1:]) if b[0] - a[1] >= 0.9] + ([words[-1][1]] if words else [])
+    calm = [x for x in ends if t_in + 10 <= x <= t_in + 28]
+    if calm:                                          # pierwsza dluzsza pauza po akcji
+        t_out = min(float(clip["raw_dur"]), calm[0] + 0.5)
     if t_out - t_in >= 8:
         clip["t_in"], clip["t_out"] = round(t_in, 2), round(t_out, 2)
 
@@ -591,6 +627,14 @@ class Channel:
         self.ai = {"state": "off", "note": ""}   # off | waiting | working | done | error
         self.recent = deque(maxlen=80)           # ostatnie wiadomosci czatu (dla AI)
         self._kw = (None, set())
+        self.users = set()                       # kto pisal w biezacym oknie
+        self.texts = {}                          # tresci wiadomosci w biezacym oknie (do wykrycia spamu reakcji)
+        self.uhist = deque(maxlen=90)            # liczba piszacych osob na okno
+        self.sens = 4.0                          # czulosc automatu; sama sie dostraja do tempa klipow
+        self.score = 0.0
+        self.za, self.za_t = 0.0, 0.0            # jak bardzo dzwiek odstaje od normy (i kiedy zmierzono)
+        self.fired = deque(maxlen=40)            # czasy automatycznych klipow
+        self.adapt_t = time.time()
         self.emo = {}                            # emotki w biezacym oknie: id -> [liczba, nazwa]
         self.emo_hist = deque(maxlen=3)
         self.vol = deque(maxlen=30)     # glosnosc kolejnych okien (dB)
@@ -644,6 +688,10 @@ class Channel:
 
     def maybe_tune(self):
         """Uruchamia dobor ustawien przez AI, gdy kanal jest na zywo i zebral ok. 2 min czatu."""
+        s = self.app.settings
+        if (self.ai["state"] in ("off", "done") and s["auto_ai_tune"] and ai_ready(s)
+                and time.time() - self.ai.get("at", 0) > 86400):
+            self.ai = {"state": "waiting", "note": self.ai.get("note", "")}
         if self.ai["state"] != "waiting" or self.state != "live" or len(self.hist) < 12:
             return
         self.ai = {"state": "working", "note": ""}
@@ -651,7 +699,7 @@ class Channel:
         def work():
             try:
                 note = ai_tune(self)
-                self.ai = {"state": "done", "note": note}
+                self.ai = {"state": "done", "note": note, "at": time.time()}
                 self.app.log("%s: AI dobralo ustawienia kanalu" % self.name)
             except Exception as e:
                 self.ai = {"state": "error", "note": str(e)[:200]}
@@ -677,7 +725,12 @@ class Channel:
         if v is None:
             return
         base = sorted(self.vol)[len(self.vol) // 2] if len(self.vol) >= 6 else None
+        if base is not None:
+            mad = statistics.median([abs(x - base) for x in self.vol])
+            self.za, self.za_t = (v - base) / max(1.5, 1.4826 * mad), time.time()
         self.vol.append(v)
+        if s["auto_detect"]:
+            return                        # w trybie automatycznym decyduje wspolny wynik w auto_bucket
         if (base is not None and v - base >= s["audio_db"] and s["auto_clip"]
                 and time.time() - self.last_clip >= s["cooldown_sec"]):
             self.trigger("skok głośności", int(round(v - base)))
@@ -713,6 +766,9 @@ class Channel:
                             msg = rest.partition(b" :")[2]
                             text = msg.decode("utf-8", "replace")
                             self.recent.append(text[:140])
+                            self.users.add(head.rsplit(b":", 1)[-1].split(b"!")[0])
+                            key = text.strip().lower()[:60]
+                            self.texts[key] = self.texts.get(key, 0) + 1
                             em = re.search(rb"(?:^@|;)emotes=([^; ]+)", head)
                             if em:
                                 for part in em.group(1).split(b"/"):
@@ -764,21 +820,59 @@ class Channel:
         k = max(total, key=lambda x: total[x][0])
         return {"id": k, "name": total[k][1], "count": total[k][0]} if total[k][0] >= 3 else None
 
-    def close_bucket(self, count, kw=0):
+    def close_bucket(self, count, kw=0, users=None, rep=None):
         s = self.app.settings
         self.emo_hist.append(self.emo)
         self.emo = {}
-        base = list(self.hist)[-int(s["window_buckets"]):]
+        if users is None:                 # dane z biezacego okna czatu
+            users = len(self.users) if self.users else count
+            rep = (1 - len(self.texts) / count) if count >= 4 and self.texts else 0.0
+        self.users, self.texts = set(), {}
         self.hist.append(count)
+        self.maybe_tune()
+        ready = s["auto_clip"] and self.state == "live" and time.time() - self.last_clip >= s["cooldown_sec"]
+        if s["auto_detect"]:
+            self.auto_bucket(users, rep or 0.0, ready)
+            return
+        base = list(self.hist)[-int(s["window_buckets"]) - 1:-1]
         self.base = sum(base) / len(base) if base else 0.0
         self.thr = max(self.get("min_msgs"), self.base * self.get("multiplier")) if len(base) >= 6 else None
-        self.maybe_tune()
-        if not (s["auto_clip"] and self.state == "live" and time.time() - self.last_clip >= s["cooldown_sec"]):
+        if not ready:
             return
         if self.thr and count >= self.thr:
             self.trigger("skok czatu", count)
         elif self.kwset() and kw >= self.get("keyword_hits"):
             self.trigger("słowa-wyzwalacze", kw)
+
+    def auto_bucket(self, u, rep, ready):
+        """Automat: porownuje okno z typowym poziomem TEGO czatu i sam dostraja czulosc."""
+        s = self.app.settings
+        base = list(self.uhist)[-60:]
+        self.uhist.append(u)
+        if len(base) < 6:
+            self.thr, self.score = None, 0.0
+            return
+        med = statistics.median(base)
+        mad = statistics.median([abs(x - med) for x in base])
+        spread = max(1.0, 1.4826 * mad, 0.15 * med)      # typowe wahania czatu
+        zc = (u - med) / spread
+        za = self.za if time.time() - self.za_t < 2.5 * s["bucket_sec"] else 0.0
+        self.base = med
+        self.thr = med + self.sens * spread
+        # wynik: skok liczby piszacych + powtarzajace sie reakcje + glosniejszy dzwiek
+        self.score = round(zc + 2.5 * rep + 0.6 * max(0.0, za), 2)
+        now = time.time()
+        if ready and self.score >= self.sens and u >= max(3, med + 2):
+            loud = 0.6 * za > zc
+            if self.trigger("skok głośności" if loud else "skok czatu", int(round(za * 3)) if loud else u):
+                self.fired.append(now)
+                self.adapt_t = now
+                recent = [t for t in self.fired if now - t < 1800]
+                if len(recent) > max(1, s["target_rate"] / 2):       # za duzo klipow - podnies poprzeczke
+                    self.sens = min(8.0, self.sens + 0.5)
+        elif self.state == "live" and now - self.adapt_t > 600:      # 10 min ciszy - obniz poprzeczke
+            self.sens = max(2.5, self.sens - 0.25)
+            self.adapt_t = now
 
     def trigger(self, reason, peak=0):
         if self.state != "live" or not self.rec_path:
@@ -823,7 +917,8 @@ class Channel:
                 if self.state != "live" and path.exists() and path.stat().st_size > 200_000:
                     self.state, self.rec_path, self.live_since = "live", path, time.time()
                     self.app.log("%s: NA ZYWO - nagrywam" % self.name)
-                if self.state == "live" and self.opts["audio_trigger"] and time.time() >= self.vol_next:
+                if (self.state == "live" and (self.opts["audio_trigger"] or self.app.settings["auto_detect"])
+                        and time.time() >= self.vol_next):
                     self.vol_next = time.time() + self.app.settings["bucket_sec"]
                     self.check_volume(path)
                 time.sleep(1)
@@ -844,9 +939,11 @@ class Channel:
             size = self.rec_path.stat().st_size if self.rec_path else 0
         except OSError:
             pass
+        auto = bool(self.app.settings["auto_detect"])
         return {"name": self.name, "enabled": self.enabled, "state": self.state, "chat": self.chat_ok,
+                "auto": auto, "sens": self.sens, "score": self.score,
                 "opts": self.opts, "ai": self.ai, "vol": self.vol[-1] if self.vol else None,
-                "hist": list(self.hist), "cur": self.cur, "kw": self.kw, "thr": self.thr,
+                "hist": list(self.uhist if auto else self.hist), "cur": self.cur, "kw": self.kw, "thr": self.thr,
                 "live_since": self.live_since, "rec_mb": round(size / 1e6)}
 
 
@@ -884,7 +981,12 @@ class App:
             self.channels[c["name"]] = Channel(self, c["name"], c.get("enabled", True), c.get("opts"))
             if isinstance(c.get("ai"), dict):
                 self.channels[c["name"]].ai = {"state": str(c["ai"].get("state", "off")),
-                                               "note": str(c["ai"].get("note", ""))}
+                                               "note": str(c["ai"].get("note", "")),
+                                               "at": float(c["ai"].get("at", 0) or 0)}
+            try:
+                self.channels[c["name"]].sens = max(2.5, min(8.0, float(c.get("sens", 4.0))))
+            except (TypeError, ValueError):
+                pass
 
     def start(self):
         threading.Thread(target=self._worker, daemon=True).start()
@@ -905,7 +1007,7 @@ class App:
     def save(self):
         with self.lock:
             CFG.write_text(json.dumps({"settings": self.settings, "paused": self.paused, "ai_status": AI_STATUS, "channels": [
-                {"name": c.name, "enabled": c.enabled, "opts": c.opts,
+                {"name": c.name, "enabled": c.enabled, "opts": c.opts, "sens": c.sens,
                  "ai": c.ai if c.ai["state"] != "working" else {"state": "waiting", "note": ""}}
                 for c in self.channels.values()]},
                 indent=2), "utf-8")
@@ -981,13 +1083,27 @@ class App:
         clip["src"] = True
         if s["captions"] and whisper_available():
             try:
+                t0 = time.time()
                 clip["words"] = [[round(a, 2), round(b, 2), t] for a, b, t in
                                  transcribe(CLIPS / raw, s["whisper_model"],
                                             ch.get("language") if ch else s["language"])]
+                order = ["large-v3", "medium", "small", "base", "tiny"]
+                took, first = time.time() - t0, not getattr(self, "_model_timed", False)
+                self._model_timed = True
+                if (s["auto_model"] and not first and took > 1.5 * float(clip["raw_dur"])
+                        and s["whisper_model"] in order[:-1]):
+                    s["whisper_model"] = order[order.index(s["whisper_model"]) + 1]
+                    self.log("Napisy trwaly %.0f s na %.0f s nagrania - przelaczam model na %s" % (
+                        took, clip["raw_dur"], s["whisper_model"]))
             except Exception as e:
                 self.log("%s: napisy pominiete (%s)" % (clip["channel"], CAPTION_ERR["msg"] or str(e)[-150:]))
         o = {**CH_OPTS, **(ch.opts if ch else {})}
         if o["hook"]:
+            if s["auto_detect"] and clip.get("peak_at") is not None:
+                act = find_action(CLIPS / raw, float(clip["peak_at"]) + 3, float(clip["raw_dur"]))
+                if act is not None:
+                    clip["action_at"] = act
+                    clip["peak_at"] = act          # zoom, naklejka i puenta celuja w sama akcje
             hook_trim(clip, s)
         if clip.get("words"):
             if o.get("ai_cut") and ai_ready(s):
