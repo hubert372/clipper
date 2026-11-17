@@ -1010,6 +1010,25 @@ class App:
                     self.save()
                     return {"error": "Kanał dodany, ale AI nie jest gotowe. " + ai_missing(self.settings)}
                 self.channels[name].ai = {"state": "waiting", "note": ""}
+        elif path == "/api/ai/login":
+            exe = which("claude")
+            if not exe:
+                webbrowser.open("https://code.claude.com/docs/en/quickstart")
+                return {"error": "Nie znaleziono Claude Code. Otwieram stronę z instalacją; po instalacji uruchom Clipper ponownie."}
+            # oficjalne logowanie Claude Code w osobnym oknie konsoli; Clipper nie widzi danych logowania
+            subprocess.Popen([exe, "auth", "login"], cwd=str(DATA),
+                             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+            self.settings["ai_mode"] = "cli"
+            self.log("Otwarto logowanie Claude Code; tryb AI ustawiony na Claude Code")
+        elif path == "/api/ai/test":
+            if not ai_ready(self.settings):
+                return {"error": ai_missing(self.settings)}
+            try:
+                out = claude_json(self.settings, 'Odpowiedz WYLACZNIE obiektem JSON: {"ok": true}', 50)
+            except Exception as e:
+                return {"error": "AI nie odpowiada: " + str(e)[:220]}
+            if not out.get("ok"):
+                return {"error": "AI odpowiedziało, ale inaczej niż oczekiwano"}
         elif path == "/api/channels/ai":
             ch = self.channels.get(body.get("name"))
             if not ch:

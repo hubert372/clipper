@@ -363,8 +363,13 @@ function vSettings() {
       : type === 'num' ? `<input type="number" min="0" step="${opt}" data-k="${k}" value="${v}">`
       : type === 'color' ? `<input type="color" data-k="${k}" value="${esc(v)}">`
       : `<input type="${type === 'pass' ? 'password' : 'text'}" data-k="${k}" value="${esc(v)}" autocomplete="off">`;
-    return `<div class="field"><span>${label}</span>${ctl}</div>`; }).join('')}</div>`).join('')}</div>`;
+    return `<div class="field"><span>${label}</span>${ctl}</div>`; }).join('')}${title.startsWith('AI') ? `<div class="row wrap" style="margin-top:12px">
+      <button class="b go" onclick="aiLogin()">Zaloguj do Claude Code</button><button class="b" id="aitest" onclick="aiTest()">Sprawdź połączenie</button></div>
+      <p class="sub" style="margin-top:8px">Logowanie otwiera oficjalne okno Claude Code i stronę Anthropic w przeglądarce. Clipper nie widzi hasła.</p>` : ''}</div>`).join('')}</div>`;
 }
+async function aiLogin() { const r = await post('/api/ai/login', {}); if (!r.error) { toast('Dokończ logowanie w oknie Claude Code, potem kliknij Sprawdź połączenie'); draw(true); } }
+async function aiTest() { const b = $('aitest'); b.disabled = true; b.textContent = 'Sprawdzam…'; const r = await post('/api/ai/test', {}, true);
+  toast(r.error || 'AI działa'); b.disabled = false; b.textContent = 'Sprawdź połączenie'; }
 async function saveSettings() {
   const out = {}; document.querySelectorAll('#fields [data-k]').forEach(el => { out[el.dataset.k] = el.classList.contains('sw') ? el.classList.contains('on') : el.value; });
   const r = await post('/api/settings', out); if (!r.error) { toast('Zapisano ustawienia'); draw(true); }
