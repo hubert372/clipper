@@ -225,6 +225,11 @@ function chOpts(name) {
     <div id="cambox"><h2>Obszar kamerki na streamie (w % obrazu)</h2>
     <div class="row wrap"><select onchange="if(this.value)CAMS[this.value].forEach((v,i)=>document.querySelectorAll('#chdlg [data-cam]')[i].value=v)"><option value="">Szybki wybór…</option>${Object.keys(CAMS).map(k => `<option>${k}</option>`).join('')}</select>
       ${['Od lewej', 'Od góry', 'Szerokość', 'Wysokość'].map((t, i) => `<label class="sub">${t}<br><input type="number" min="0" max="100" style="width:76px" data-cam value="${o.cam[i]}"></label>`).join('')}</div></div>
+    <h2>Kampania klipowania</h2><p class="sub" style="margin-bottom:8px">Clipper dopilnuje wymagań kampanii w każdym klipie z tego kanału: nazwa twórcy w tekście, hashtagi, język, brak logo.</p>
+    <div class="field"><span>Klipy z tego kanału idą do kampanii</span><button type="button" class="sw ${o.camp_on ? 'on' : ''}" data-o="camp_on" aria-label="Kampania" onclick="this.classList.toggle('on')"></button></div>
+    ${[['camp_name', 'Nazwa twórcy wymagana w tekście', 'np. LACY'], ['camp_tags', 'Wymagane hashtagi', 'np. #LACY #GTA6'], ['camp_lang', 'Język napisów i opisów', 'en'], ['camp_url', 'Link do kampanii', 'https://contentrewards.com/…']].map(([k, t, ph]) =>
+      `<div class="field"><span>${t}</span><input type="text" data-v="${k}" value="${esc(o[k] ?? '')}" placeholder="${ph}" style="width:220px"></div>`).join('')}
+    <button class="b" style="margin-top:8px" onclick="campPreset()">Wstaw ustawienia: Lacy GTA 6 (Reach)</button>
     <h2>Wykrywanie tylko dla tego kanału</h2><p class="sub" style="margin-bottom:8px">Puste pole oznacza wartość z Ustawień.</p>
     ${[['multiplier', 'Czułość (× średniej czatu)', 'number'], ['min_msgs', 'Minimum wiadomości w oknie', 'number'], ['keywords', 'Słowa-wyzwalacze', 'text'],
        ['keyword_hits', 'Ile wiadomości ze słowem', 'number'], ['language', 'Język napisów (np. pl, en)', 'text']].map(([k, t, ty]) =>
@@ -232,6 +237,11 @@ function chOpts(name) {
     <div class="row" style="margin-top:16px">${S.deps.ai ? '' : '<!--'}<button class="b" onclick="chdlg.close();post('/api/channels/ai',{name:'${name}'}).then(r=>{if(!r.error)toast('AI dobierze ustawienia, gdy kanał będzie na żywo')})">Dobierz przez AI</button>${S.deps.ai ? '' : '-->'}
       <span class="grow"></span><button class="b go" onclick="saveCh('${name}')">Zapisz opcje</button></div>`;
   d.showModal(); camBox();
+}
+function campPreset() {
+  const set = (k, v) => { document.querySelector(`#chdlg [data-v=${k}]`).value = v; }, sw = (k, on) => document.querySelector(`#chdlg [data-o=${k}]`).classList.toggle('on', on);
+  set('camp_name', 'LACY'); set('camp_tags', '#LACY #GTA6 #gta6clips'); set('camp_lang', 'en'); set('camp_url', 'https://contentrewards.com/c/campaigns/a5c63fad-cd53-4b81-9305-4a2d1696872a');
+  sw('camp_on', true); sw('title_bar', true); sw('logo', false); sw('facecam', true); camBox(); toast('Wstawiono. Sprawdź obszar kamerki i zapisz opcje.');
 }
 function camBox() { const b = document.querySelector('#chdlg [data-o=facecam]'); if (b) $('cambox').style.display = b.classList.contains('on') ? '' : 'none'; }
 async function saveCh(name) {
@@ -385,6 +395,17 @@ function pub(id, platform, obj) { const c = clip(id); c.pub = c.pub || {}; c.pub
   if (obj.text != null) { c.posts = c.posts || {}; c.posts[platform] = obj.text; }
   fetch('/api/clips/pub', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(Object.assign({id, platform}, obj))}); }
 function copyText(t) { (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).catch(() => { const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); }); toast('Skopiowano'); }
+// kontrola wymagan kampanii dla klipu
+function campChecks(c) {
+  const n = c.camp.name.toLowerCase(), tags = c.camp.tags.toLowerCase().split(/\s+/).filter(Boolean), posts = PLAT.map(([k]) => ((c.posts || {})[k] || '').toLowerCase());
+  const o = c.opts || {}, rows = [
+    [(c.title || '').toLowerCase().includes(n) && (o.title_bar || posts.every(p => p.includes(n))), `Nazwa ${c.camp.name} w tekście na klipie lub w opisie`],
+    [tags.every(t => posts.every(p => p.includes(t))), `Hashtagi ${c.camp.tags} w każdym opisie`],
+    [!!o.facecam, 'Twórca widoczny przez cały klip (układ z kamerką)'], [!o.logo, 'Brak logo na klipie'],
+    [(c.camp.lang || 'en') === 'en', 'Napisy i opisy po angielsku']];
+  return `<div class="sub" style="margin:10px 0;line-height:1.8">${rows.map(([ok, t]) => `<span style="color:${ok ? 'var(--mint)' : 'var(--hot)'}">${ok ? '✓' : '✗'} ${esc(t)}</span>`).join('<br>')}
+    ${c.camp.url ? `<br><a class="link" href="${esc(c.camp.url)}" target="_blank" rel="noopener">Otwórz kampanię, żeby zgłosić link</a>` : ''}</div>`;
+}
 function vPublish() {
   const list = ready().filter(c => c.review === 'ok');
   const left = c => PLAT.filter(([k]) => !((c.pub || {})[k] || {}).done).length;
@@ -393,12 +414,16 @@ function vPublish() {
   ${list.map(c => `<div class="card" style="margin-bottom:14px"><div class="row wrap"><button class="link name" onclick="openClip('${c.id}')">${esc(c.title || c.channel)}</button>
       <span class="sub grow">${esc(c.channel)}, ${when(c.created)}</span><a class="b" style="text-decoration:none" href="${src(c)}" download="${esc(c.file)}">Pobierz klip</a>
       ${S.deps.ai ? `<button class="b" onclick="this.disabled=true;this.textContent='Piszę…';post('/api/clips/posts-ai',{id:'${c.id}'}).then(r=>{if(!r.error)toast('Opisy gotowe')})">Napisz opisy przez AI</button>` : ''}</div>
+    ${c.camp ? campChecks(c) : ''}
     ${PLAT.map(([k, t]) => { const p = (c.pub || {})[k] || {}, txt = (c.posts || {})[k] || '';
       return `<div class="pubrow"><b>${t}</b><textarea onchange="pub('${c.id}','${k}',{text:this.value})">${esc(txt)}</textarea>
         <div class="ctl"><button class="b" onclick="copyText(this.closest('.pubrow').querySelector('textarea').value)">Kopiuj opis</button>
           <label>Plan <input type="datetime-local" value="${esc(p.at || '')}" onchange="pub('${c.id}','${k}',{at:this.value})"></label>
           <label class="row" style="gap:6px">Wrzucone <button type="button" class="sw ${p.done ? 'on' : ''}" aria-label="Wrzucone na ${t}" onclick="this.classList.toggle('on');pub('${c.id}','${k}',{done:this.classList.contains('on')})"></button></label>
-          <label>Wyświetlenia <input type="number" min="0" value="${p.views || 0}" onchange="pub('${c.id}','${k}',{views:+this.value})"></label></div></div>`; }).join('')}</div>`).join('') ||
+          <label>Wyświetlenia <input type="number" min="0" value="${p.views || 0}" onchange="pub('${c.id}','${k}',{views:+this.value})"></label>
+          ${c.camp ? `<input type="text" placeholder="Link do wrzuconego klipu" value="${esc(p.link || '')}" style="width:200px" onchange="pub('${c.id}','${k}',{link:this.value})">
+            <label class="row" style="gap:6px">Zgłoszone <button type="button" class="sw ${p.sub ? 'on' : ''}" aria-label="Zgłoszone w kampanii" onclick="this.classList.toggle('on');pub('${c.id}','${k}',{sub:this.classList.contains('on')})"></button></label>
+            ${p.done && !p.sub ? `<span style="color:${S.now - p.done_at > 1500 ? 'var(--hot)' : 'var(--amber)'}">${S.now - p.done_at > 1800 ? 'Minęło 30 min na zgłoszenie' : 'Zgłoś w ciągu ' + Math.max(0, Math.ceil((1800 - (S.now - p.done_at)) / 60)) + ' min'}</span>` : ''}` : ''}</div></div>`; }).join('')}</div>`).join('') ||
     '<div class="empty">Zatwierdź klip w zakładce Klipy, a pojawi się tutaj z opisami.</div>'}`;
 }
 
