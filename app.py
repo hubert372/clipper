@@ -1016,6 +1016,7 @@ class Channel:
         self.vol = deque(maxlen=30)     # glosnosc kolejnych okien (dB)
         self.vol_next = 0.0
         self.gta_next, self.gta_busy, self.gta_seen, self.gta_ai = 0.0, False, {}, 0.0
+        self.cam_cache = {}             # kamerka wskazana przez AI dla danej sceny
         self.meta, self.meta_next = {}, 0.0   # tytul i kategoria streama
         self.gta_note = ""              # ostatnie wydarzenie GTA (do podgladu)
         self.state = "stopped"          # stopped | paused | waiting | live
@@ -2115,30 +2116,18 @@ class App:
         try:
             fc, v, a = self.source_filters(tl, has_audio)
             fh = int(1080 * sh / sw) // 2 * 2
-            face, face_crop = None, None
-            if s["smart_layout"]:
-                face = find_face(CLIPS / raw, tl["t_in"], tl["t_in"] + tl["dur0"])
+            zoom_off = False
+            face = find_face(CLIPS / raw, tl["t_in"], tl["t_in"] + tl["dur0"]) if s["smart_layout"] else None
             if face is not None:
                 if not face:                                   # w klipie nie ma twarzy - nie wycinaj kamerki na slepo
                     if o["facecam"]:
                         self.log("%s: w klipie nie widac twarzy - uklad bez kamerki" % clip["channel"])
                     o["facecam"], clip["layout"] = False, "bez kamerki (brak twarzy)"
-                elif face[3] >= 0.2:                           # twarz na duzej czesci kadru = kamera na caly ekran
-                    o["facecam"], face_crop, clip["layout"] = False, face[0], "kamera na cały ekran, kadr na twarz"
                 elif o["facecam"]:
-                    x, y, w, h = [float(n) for n in (list(o["cam"]) + [0, 0, 30, 30])[:4]]
-                    if not (x <= face[0] * 100 <= x + w and y <= face[1] * 100 <= y + h):
-                        bw, bh = min(60.0, face[2] * 380), min(70.0, face[3] * 240)     # glowa i ramiona wokol twarzy
-                        o["cam"] = [max(0.0, min(100 - bw, face[0] * 100 - bw / 2)),
-                                    max(0.0, min(100 - bh, face[1] * 100 - bh * 0.45)), bw, bh]
-                        clip["layout"] = "kamerka znaleziona po twarzy"
-                    else:
-                        clip["layout"] = "kamerka z ustawień kanału"
-            if face_crop is not None:
-                fc.append("%s%s,setsar=1[v1]" % (v, scaled(
-                    1080, 1920, "scale=-2:1920,crop=1080:1920:'max(0,min(iw-1080,iw*%.4f-540))':0," % face_crop)))
-                bottom, bar_y, mid_y = (390 if safe else 330), (1920 - 380 if safe else 1908), 520
-            elif o["facecam"]:
+                    o["cam"], clip["layout"] = self.cam_box(clip, ch, o, face, CLIPS / raw, tl["t_in"] + tl["dur0"] / 2)
+                    if face[3] >= 0.2:
+                        zoom_off = True                        # kamera na caly ekran: pod zblizeniem pokaz caly kadr
+            if o["facecam"]:
                 x, y, w, h = [max(0.0, min(100.0, float(n))) for n in (list(o["cam"]) + [0, 0, 30, 30])[:4]]
                 w, h = max(5.0, min(w, 100 - x)), max(5.0, min(h, 100 - y))
                 aspect = (sw * w) / (sh * h)
@@ -2150,7 +2139,7 @@ class App:
                     chh, cw = max_h, int(max_h * aspect)
                 cw, chh = cw // 2 * 2, chh // 2 * 2
                 gy = top + chh + 30
-                zoom = max(1.0, min(2.0, float(s["game_zoom"])))
+                zoom = 1.0 if zoom_off else max(1.0, min(2.0, float(s["game_zoom"])))
                 fc.append(
                     "%ssplit=3[b0][c0][g0];"
                     "[b0]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=30:5,"
@@ -2274,6 +2263,48 @@ class App:
                     "reels": title + "\n\n" + tags}
         return {"shorts": (title[:88] + " #shorts") + "\n\n" + tags + "\nŹródło: twitch.tv/" + clip["channel"],
                 "tiktok": (title + " " + tags)[:150], "reels": title + "\n\n" + tags}
+
+    def cam_box(self, clip, ch, o, face, src, t):
+        """Prostokat kamerki dla tego klipu (w % kadru) i opis, skad sie wzial. Caly kadr zawsze zostaje widoczny pod spodem."""
+        cx, cy, fw, fh = face
+        inside = lambda b: (b[0] <= cx * 100 <= b[0] + b[2] and b[1] <= cy * 100 <= b[1] + b[3]
+                            and 0.12 <= fh * 100 / max(1.0, b[3]) <= 0.8)      # twarz w srodku i w rozsadnej skali
+        head = lambda kw, kh: [max(0.0, min(100 - min(70.0, fw * kw), cx * 100 - min(70.0, fw * kw) / 2)),
+                               max(0.0, min(100 - min(80.0, fh * kh), cy * 100 - min(80.0, fh * kh) * 0.42)),
+                               min(70.0, fw * kw), min(80.0, fh * kh)]
+        if fh >= 0.2:                                           # twarz na duzej czesci ekranu: nie ma osobnej kamerki
+            return head(300, 230), "kamera na cały ekran: zbliżenie u góry, cały kadr niżej"
+        own = [float(n) for n in (list(o["cam"]) + [0, 0, 30, 30])[:4]]
+        if inside(own):
+            return own, "kamerka z ustawień kanału"
+        key = (round(cx * 12), round(cy * 12), round(fh * 25))  # ta sama scena -> ten sam wynik, bez kolejnego pytania
+        cache = ch.cam_cache if ch else {}
+        if key in cache:
+            return cache[key], "kamerka wskazana przez AI"
+        if ai_ready(self.settings):
+            try:
+                shot = DATA / ("cam_%s.jpg" % clip["id"])
+                run([which("ffmpeg"), "-y", "-v", "error", "-ss", "%.1f" % t, "-i", str(src), "-frames:v", "1",
+                     "-vf", "scale=960:-2", str(shot)], timeout=60)
+                img = base64.b64encode(shot.read_bytes()).decode()
+                shot.unlink(missing_ok=True)
+                out = claude_json(self.settings, [
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": img}},
+                    {"type": "text", "text": (
+                        "To klatka ze streama. Twarz streamera jest w okolicy %d%% szerokosci i %d%% wysokosci kadru. "
+                        "Podaj prostokat okna kamerki (wycinka z obrazem z kamery streamera), w ktorym jest ta twarz, "
+                        "jako procenty kadru. Jesli kamerka nie ma wyraznej ramki (wyciete tlo), podaj prostokat obejmujacy "
+                        "glowe i ramiona. Odpowiedz WYLACZNIE obiektem JSON: {\"x\": lewa, \"y\": gora, \"w\": szerokosc, "
+                        "\"h\": wysokosc}" % (cx * 100, cy * 100))}], 120)
+                box = [max(0.0, min(100.0, float(out[k]))) for k in ("x", "y", "w", "h")]
+                box[2], box[3] = min(box[2], 100 - box[0]), min(box[3], 100 - box[1])
+                if inside(box) and box[2] >= 5 and box[3] >= 5:
+                    if ch:
+                        ch.cam_cache[key] = box
+                    return box, "kamerka wskazana przez AI"
+            except Exception as e:
+                self.log("%s: AI nie wskazalo kamerki (%s)" % (clip["channel"], str(e)[:100]))
+        return head(380, 240), "kamerka wokół twarzy (przybliżona)"
 
     def export(self, clip, fmt):
         """Dodatkowe formaty: poziomy 16:9, kwadrat 1:1 albo plik napisow SRT. Zwraca nazwe pliku."""
