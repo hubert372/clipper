@@ -72,6 +72,7 @@ DEFAULTS = {
     "silence_gap": 2.5,       # przerwy bez mowy dluzsze niz tyle sekund sa wycinane
     "audio_db": 8.0,          # o ile dB glosniej niz zwykle, zeby zrobic klip
     "player_volume": 1.0, "player_muted": False,   # zapamietana glosnosc odtwarzacza w panelu
+    "campaign": "",           # kampania, na ktorej teraz pracujesz (puste = wszystkie)
     "theme": "dark",          # motyw panelu: dark albo light
     "learn_apply": True,      # sam zmieniaj ustawienia na to, co daje wiecej wyswietlen
     "learn_explore": True,    # co ktorys klip rob w innym wariancie, zeby bylo co porownywac
@@ -1192,10 +1193,12 @@ class App:
                     pass
 
     # ----- kampanie
-    def camp_for(self, channel, opts):
-        """Wymagania kampanii dla kanalu: z menedzera kampanii albo z opcji kanalu."""
-        for c in self.campaigns:
-            if c.get("active", True) and channel in (c.get("channels") or []):
+    def camp_for(self, channel, opts, pick=None):
+        """Wymagania kampanii dla klipu: wybrana recznie, potem biezaca, potem pierwsza z kanalem, na koncu opcje kanalu."""
+        cur = self.settings["campaign"]
+        order = sorted(self.campaigns, key=lambda c: (c["id"] != pick, c["id"] != cur))
+        for c in order:
+            if c["id"] == pick or (not pick and c.get("active", True) and channel in (c.get("channels") or [])):
                 return {"id": c["id"], "name": (c.get("name") or channel).strip(), "tags": (c.get("tags") or "").strip(),
                         "url": c.get("url") or "", "lang": c.get("lang") or "en", "rules": c.get("rules") or ""}
         if opts.get("camp_on"):
@@ -1412,7 +1415,7 @@ class App:
             raise RuntimeError("brak ffmpeg - zainstaluj: winget install Gyan.FFmpeg")
         s = self.settings
         ch = self.channels.get(clip["channel"])
-        camp = self.camp_for(clip["channel"], ch.opts if ch else CH_OPTS)
+        camp = self.camp_for(clip["channel"], ch.opts if ch else CH_OPTS, clip.get("camp_pick"))
         (CLIPS / "src").mkdir(exist_ok=True)
         raw = "src/%s.ts" % clip["id"]
         r = run([ff, "-y", "-v", "error", "-ss", str(clip["raw_start"]), "-i", str(rec), "-t", str(clip["raw_dur"]),
@@ -1618,7 +1621,7 @@ class App:
         censor = word_roots(s["censor_words"]) if o["censor"] else []
         marked = word_roots(s["highlight_words"]) if o["highlight"] else []
         shown = [t[:1] + "*" * max(1, len(t) - 1) if hits(t, censor) else t for _, _, t in words]
-        camp = self.camp_for(clip["channel"], o)
+        camp = self.camp_for(clip["channel"], o, clip.get("camp_pick"))
         clip["camp"] = camp
         if camp:
             o["logo"] = False                      # kampanie zwykle zakazuja logo na klipie
@@ -1934,8 +1937,11 @@ class App:
             name = parse_channel(body.get("name"))
             if not name:
                 return {"error": "Podaj nazwę kanału albo link twitch.tv/…"}
-            if name in self.channels and not body.get("ai"):
+            if name in self.channels and not body.get("ai") and not body.get("campaign"):
                 return {"error": "Kanał %s jest już na liście" % name}
+            camp = next((x for x in self.campaigns if x["id"] == body.get("campaign")), None)
+            if camp and name not in camp["channels"]:
+                camp["channels"].append(name)
             if name not in self.channels:
                 self.channels[name] = Channel(self, name)
                 self.channels[name].start()
@@ -2110,6 +2116,24 @@ class App:
             self.campaigns = [x for x in self.campaigns if x["id"] != new["id"]] + [new]
         elif path == "/api/campaigns/delete":
             self.campaigns = [x for x in self.campaigns if x["id"] != body.get("id")]
+            if self.settings["campaign"] == body.get("id"):
+                self.settings["campaign"] = ""
+        elif path == "/api/clips/campaign":
+            c = next((c for c in self.clips if c["id"] == body.get("id")), None)
+            camp = next((x for x in self.campaigns if x["id"] == body.get("campaign")), None)
+            if not c or c["status"] != "ready" or not camp:
+                return {"error": "Nie można przypisać tego klipu do kampanii"}
+            c["camp_pick"] = camp["id"]
+            c["camp"] = self.camp_for(c["channel"], CH_OPTS, camp["id"])
+            name, old = c["camp"]["name"], c.get("title") or ""
+            base = old.split(": ", 1)[1] if ": " in old[:40] else old          # zdejmij poprzednia nazwe z poczatku
+            c["title"] = base if name.lower() in base.lower() else "%s: %s" % (name, base)
+            c["tags"] = c["camp"]["tags"] or c.get("tags", "")
+            c["posts"] = self.default_posts(c)
+            c["pub"] = {}
+            if c.get("src"):                       # napis na klipie tez musi sie zmienic
+                c["status"] = "processing"
+                self.jobs.put(("render", c, None))
         elif path == "/api/campaigns/discover":
             try:
                 if time.time() - self._found[0] > 600 or body.get("force"):
@@ -2192,6 +2216,8 @@ class App:
                         self.settings[k] = bool(v) if isinstance(d, bool) else type(d)(v)
                     except (TypeError, ValueError):
                         pass
+            if self.settings["campaign"] not in [c["id"] for c in self.campaigns]:
+                self.settings["campaign"] = ""
             if self.settings["cap_style"] not in CAP_STYLES:
                 self.settings["cap_style"] = "pop"
             if self.settings["ai_mode"] not in ("api", "cli"):

@@ -163,7 +163,25 @@ function beep() { try { const a = new AudioContext(), o = a.createOscillator(), 
   g.gain.exponentialRampToValueAtTime(.001, a.currentTime + .4); o.start(); o.stop(a.currentTime + .4); } catch {} }
 const dur = s => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h} h ${m} min` : `${m} min`; };
 const when = t => new Date(t * 1000).toLocaleString('pl-PL', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'});
-const ready = () => S.clips.filter(c => c.status === 'ready');
+const curCamp = () => S.campaigns.find(c => c.id === S.settings.campaign);
+const inCamp = c => !S.settings.campaign || (c.camp && c.camp.id === S.settings.campaign);
+const ready = () => S.clips.filter(c => c.status === 'ready' && inCamp(c));
+async function setCamp(id) { S.settings.campaign = id; await post('/api/settings', {campaign: id}); sig = ''; draw(true); reveal(); }
+function campBar() {
+  const c = curCamp(); if (!c) return '';
+  const x = (S.camp_stats || {})[c.id] || {clips: 0, views: 0, posted: 0};
+  return `<div class="card" style="margin-bottom:18px;border-color:rgba(255,98,7,.4)"><div class="row wrap"><span class="sub">Pracujesz na kampanii</span><div class="name">${esc(c.title)}</div>
+      <span class="tag">${c.rate ? '$' + (+c.rate).toFixed(2) + ' / 1K' : c.pool ? 'pula $' + Math.round(c.pool).toLocaleString('pl-PL') : 'bez stawki'}</span><span class="grow"></span>
+      ${c.url ? `<a class="b" style="text-decoration:none" href="${esc(c.url)}" target="_blank" rel="noopener">Otwórz kampanię</a>` : ''}
+      <button class="b" onclick="editCamp(curCamp())">Edytuj zasady</button><button class="link" onclick="setCamp('')">Pokaż wszystkie</button></div>
+    <div class="row wrap sub" style="gap:18px;margin-top:10px"><span><b class="num" style="color:var(--text)">${x.clips}</b> klipów, ${x.posted} wrzuconych</span>
+      <span><b class="num" style="color:var(--text)">${x.views.toLocaleString('pl-PL')}</b> wyświetleń${c.min_views ? ' z wymaganych ' + c.min_views.toLocaleString('pl-PL') : ''}</span>
+      ${x.est != null ? `<span><b class="num" style="color:var(--mint)">$${x.est.toFixed(2)}</b> szacowanego zarobku</span>` : ''}
+      ${c.name ? `<span>Nazwa w tekście: <b style="color:var(--text)">${esc(c.name)}</b></span>` : ''}${c.tags ? `<span>Hashtagi: <b style="color:var(--text)">${esc(c.tags)}</b></span>` : ''}
+      <span>Język: <b style="color:var(--text)">${esc(c.lang || 'en')}</b></span><span>Kanały: <b style="color:var(--text)">${esc(c.channels.join(', ') || 'brak')}</b></span></div>
+    ${c.min_views ? `<div class="bar" style="margin-top:10px"><b style="width:${Math.min(100, x.views / c.min_views * 100)}%"></b></div>` : ''}
+    ${c.rules ? `<details style="margin-top:10px" ${view === 'publish' ? 'open' : ''}><summary class="link">Wymagania i zakazy</summary><div class="sub" style="white-space:pre-wrap;margin-top:6px;color:var(--text)">${esc(c.rules)}</div></details>` : ''}</div>`;
+}
 const cls = n => n >= 75 ? 'good' : n >= 50 ? 'mid' : 'low';
 const total = c => c.score ? c.score.total : null;
 const src = c => '/clips/' + encodeURIComponent(c.file || '') + '?v=' + (c.rev || 0);
@@ -186,9 +204,11 @@ function drawNav() {
   $('nav').innerHTML = '<div class="brand"><i></i>Clipper</div><div class="tabs">' +
     VIEWS.map(([k, t]) => { const n = k === 'channels' ? live : k === 'clips' && S ? ready().filter(c => c.review === 'new').length : 0;
       return `<button class="${k === view ? 'on' : ''}" onclick="go('${k}')">${t}${n ? `<span class="n">${n}</span>` : ''}</button>`; }).join('') + '</div>' +
-    (S ? `<div class="status"><span class="chip ${S.paused ? '' : 'ok'}">${S.paused ? 'Wstrzymany' : 'Działa'}</span>
+    (S ? `<div class="status">${S.campaigns.length ? `<select aria-label="Kampania, na której pracujesz" onchange="setCamp(this.value)" style="border-radius:9999px;padding:5px 10px;font-size:13px;max-width:190px">
+      <option value="">Wszystkie kampanie</option>${S.campaigns.map(c => `<option value="${c.id}" ${c.id === S.settings.campaign ? 'selected' : ''}>${esc(c.title)}</option>`).join('')}</select>` : ''}<span class="chip ${S.paused ? '' : 'ok'}">${S.paused ? 'Wstrzymany' : 'Działa'}</span>
       <span class="chip" title="Kanały na żywo">Na żywo ${live}/${S.channels.length}</span><span class="chip" title="Ostatni klip: ${last ? when(last.created) : 'brak'}">Kolejka ${S.queue}</span>
       <button class="b ${S.paused ? 'go' : ''}" onclick="post('/api/pause',{paused:${!S.paused}})">${S.paused ? 'Start' : 'Pauza'}</button></div>` : '');
+  if (document.activeElement && document.activeElement.closest && document.activeElement.closest('nav select')) return;
   $('foot').innerHTML = `${S ? 'Wersja ' + esc(S.version) : ''}<button class="b" ${updating ? 'disabled' : ''} onclick="checkUpdate()">${updating || 'Sprawdź aktualizacje'}</button>`;
   if (S && document.documentElement.dataset.theme !== S.settings.theme) { document.documentElement.dataset.theme = S.settings.theme; if (window.bgPaint) window.bgPaint(); }
 }
@@ -209,10 +229,10 @@ function vChannels() {
   if (S.deps.caption_error && S.settings.captions) warn.push('Napisy nie zadziałały przy ostatnim klipie: ' + esc(S.deps.caption_error));
   return `<h1>Kanały</h1><p class="lead">Dodaj kanały Twitch. Clipper sam czeka, aż wejdą na żywo, i tnie klip, gdy czat wybuchnie.</p>
   ${warn.map(w => `<div class="card warn">${w}</div>`).join('')}
-  <form class="row" style="margin-bottom:16px" onsubmit="event.preventDefault();const i=this.q;if(i.value.trim()){post('/api/channels/add',{name:i.value,ai:addAI});i.value=''}">
+  <form class="row" style="margin-bottom:16px" onsubmit="event.preventDefault();const i=this.q;if(i.value.trim()){post('/api/channels/add',{name:i.value,ai:addAI,campaign:S.settings.campaign});i.value=''}">
     <input name="q" class="grow" placeholder="Nazwa kanału lub link twitch.tv/…" autocomplete="off">${S.deps.ai ? `<label class="row sub" style="gap:6px;cursor:pointer" title="Claude obejrzy klatkę ze streama, tytuł, kategorię i czat, a potem sam ustawi opcje kanału. Wymaga AI ustawionego w Ustawieniach."><input type="checkbox" ${addAI ? 'checked' : ''} onchange="addAI=this.checked" style="accent-color:var(--cyan)">AI dobierze ustawienia</label>` : ''}
     <button class="b go">Dodaj kanał</button></form>
-  <div class="grid">${S.channels.map(c => { const last = c.hist.length ? c.hist[c.hist.length - 1] : 0; return `<div class="card">
+  <div class="grid">${S.channels.filter(c => !curCamp() || curCamp().channels.includes(c.name)).map(c => { const last = c.hist.length ? c.hist[c.hist.length - 1] : 0; return `<div class="card">
     <div class="row"><span class="dot ${c.state}"></span><div class="grow"><div class="name">${esc(c.name)}</div><div class="sub">${statusText(c)}</div></div>
       ${sw(c.enabled, `post('/api/channels/toggle',{name:'${c.name}',enabled:${!c.enabled}})`, 'Włącz kanał')}</div>
     <div class="chart">${bars(c, 30)}</div>
@@ -319,6 +339,8 @@ function drawSide() {
     ${sc.parts.map(p => `<div class="part"><span>${esc(p.name)}</span><div class="bar"><b style="width:${p.score / p.max * 100}%"></b></div><span class="num sub">${p.score}/${p.max}</span></div>`).join('')}
     ${sc.tips.length ? `<h2>Co poprawić</h2><ul class="tips">${sc.tips.slice(0, 4).map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
     <p class="sub" style="margin:10px 0">${esc(c.tags || '')}</p>
+    ${S.campaigns.length ? `<div class="row sub" style="margin-bottom:10px">Kampania: <select onchange="if(this.value)post('/api/clips/campaign',{id:'${c.id}',campaign:this.value}).then(r=>{if(!r.error)toast('Klip przypisany do kampanii')})">
+      <option value="">${c.camp && !c.camp.id ? 'z opcji kanału' : 'bez kampanii'}</option>${S.campaigns.map(k => `<option value="${k.id}" ${c.camp && c.camp.id === k.id ? 'selected' : ''}>${esc(k.title)}</option>`).join('')}</select></div>` : ''}
     <div class="row sub" style="margin-bottom:10px">Podgląd interfejsu: <select onchange="setUI(this.value)">${[['', 'Brak'], ['tiktok', 'TikTok'], ['reels', 'Reels'], ['shorts', 'Shorts']].map(([k, t]) => `<option value="${k}" ${k === uiMode ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
     ${c.review !== 'ok' ? `<div class="row" style="margin-bottom:10px"><button class="b go grow" onclick="post('/api/clips/review',{id:'${c.id}',ok:true})">Zatwierdź</button>
       <button class="b bad grow" onclick="${shut}post('/api/clips/review',{id:'${c.id}',ok:false})">Odrzuć</button></div>` : ''}
@@ -329,7 +351,7 @@ function drawSide() {
       <button class="b bad" onclick="if(confirm('Usunąć ten klip?')){${shut}post('/api/clips/delete',{id:'${c.id}'})}">Usuń</button></div>`;
 }
 function vClips() {
-  let list = S.clips.filter(c => (!filt.ch || c.channel === filt.ch) && (!filt.rev || (filt.rev === 'ok' ? c.review === 'ok' : c.review !== 'ok')));
+  let list = S.clips.filter(c => inCamp(c) && (!filt.ch || c.channel === filt.ch) && (!filt.rev || (filt.rev === 'ok' ? c.review === 'ok' : c.review !== 'ok')));
   if (filt.sort === 'score') list = [...list].sort((a, b) => (total(b) ?? -1) - (total(a) ?? -1));
   if (filt.sort === 'best') list = [...list].sort((a, b) => (b.review !== 'ok') - (a.review !== 'ok') || (b.pot ?? -1) - (a.pot ?? -1));
   const chans = [...new Set(S.clips.map(c => c.channel))];
@@ -603,7 +625,8 @@ function vCampaigns() {
     ${c.min_views ? `<div class="bar" style="margin-bottom:10px"><b style="width:${Math.min(100, x.views / c.min_views * 100)}%"></b></div>` : ''}
     <div class="sub">Kanały: ${c.channels.length ? esc(c.channels.join(', ')) : 'żaden, przypisz kanał w edycji'}${c.name ? '<br>Wymagana nazwa: ' + esc(c.name) : ''}${c.tags ? '<br>Hashtagi: ' + esc(c.tags) : ''}</div>
     ${c.rules ? `<details style="margin-top:8px"><summary class="link">Wymagania i zakazy</summary><div class="sub" style="white-space:pre-wrap;margin-top:6px">${esc(c.rules)}</div></details>` : ''}
-    <div class="row wrap" style="margin-top:12px"><button class="b" onclick="editCamp(S.campaigns.find(x=>x.id==='${c.id}'))">Edytuj</button>
+    <div class="row wrap" style="margin-top:12px">${S.settings.campaign === c.id ? '<span class="tag ok">wybrana</span>' : `<button class="b go" onclick="setCamp('${c.id}').then(()=>go('clips'))">Pracuj na tej kampanii</button>`}
+      <button class="b" onclick="editCamp(S.campaigns.find(x=>x.id==='${c.id}'))">Edytuj</button>
       ${c.url ? `<a class="b" style="text-decoration:none" href="${esc(c.url)}" target="_blank" rel="noopener">Otwórz kampanię</a>` : ''}
       <button class="link bad" onclick="if(confirm('Usunąć kampanię?'))post('/api/campaigns/delete',{id:'${c.id}'})">Usuń</button></div></div>`; }).join('') ||
     '<div class="empty">Nie masz jeszcze kampanii. Wczytaj ją z linku albo wybierz z proponowanych poniżej.</div>'}</div>
@@ -665,7 +688,8 @@ function draw(force) {
   if (!force && view === 'channels' && document.activeElement && document.activeElement.name === 'q') return;
   sig = s2;
   const log = $('log'), top = log ? log.scrollTop : null;
-  $('view').innerHTML = (S.paused ? `<div class="card warn row" style="border-color:var(--violet);color:var(--text)"><span class="grow">Clipper jest wstrzymany. Kanały nie są nagrywane i klipy nie powstają.</span>
+  const bar = ['channels', 'clips', 'publish', 'rating', 'stats'].includes(view) ? campBar() : '';
+  $('view').innerHTML = bar + (S.paused ? `<div class="card warn row" style="border-color:var(--violet);color:var(--text)"><span class="grow">Clipper jest wstrzymany. Kanały nie są nagrywane i klipy nie powstają.</span>
     <button class="b go" onclick="post('/api/pause',{paused:false})">Start</button></div>` : '') + RENDER[view]();
   if (view === 'settings') { styleKey = ''; snap = JSON.stringify(collect()); applyDeps(); }
   if ($('log')) $('log').scrollTop = top == null ? 1e6 : top;
