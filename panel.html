@@ -328,7 +328,7 @@ function vChannels() {
 const CH_FIELDS = [['hook', 'Haczyk: krótki klip zaczynający się tuż przed akcją'], ['payoff_first', 'Najpierw puenta (2 s zapowiedzi na początku)'], ['auto_zoom', 'Auto-zoom w szczytowym momencie'],
   ['sticker', 'Emotka z czatu jako naklejka'], ['sfx', 'Efekty dźwiękowe (start i szczyt)'], ['facecam', 'Układ z kamerką (kamerka u góry, gra na dole)'], ['title_bar', 'Nagłówek z tytułem klipu'], ['progress', 'Pasek postępu'],
   ['logo', 'Logo / znak wodny'], ['censor', 'Cenzura przekleństw'], ['cut_silence', 'Wycinanie ciszy'], ['highlight', 'Wyróżnianie słów kluczowych'],
-  ['loudnorm', 'Wyrównanie głośności'], ['ai_cut', 'AI wybiera najlepszy fragment i tytuł (1 zapytanie na klip)'], ['audio_trigger', 'Klip także przy skoku głośności']];
+  ['loudnorm', 'Wyrównanie głośności'], ['ai_cut', 'AI wybiera najlepszy fragment i tytuł (1 zapytanie na klip)'], ['audio_trigger', 'Klip także przy skoku głośności'], ['gta', 'Detektor GTA: klip, gdy streamer mówi o pościgu, kraksie, kaskadzie, strzelaninie lub misji (po angielsku)']];
 const CAMS = {'Lewy dół': [2, 68, 26, 30], 'Prawy dół': [72, 68, 26, 30], 'Lewy górny': [2, 2, 26, 30], 'Prawy górny': [72, 2, 26, 30]};
 function chOpts(name) {
   const c = S.channels.find(x => x.name === name), o = c.opts, d = $('chdlg');
