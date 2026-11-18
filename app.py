@@ -78,6 +78,9 @@ DEFAULTS = {
     "learn_apply": True,      # sam zmieniaj ustawienia na to, co daje wiecej wyswietlen
     "learn_explore": True,    # co ktorys klip rob w innym wariancie, zeby bylo co porownywac
     "ai_cut_all": True,       # gdy AI jest dostepne, to ono wybiera fragment i tytul kazdego klipu
+    "rank_window": 10,        # minuty: kandydaci z tego okna sa porownywani, klipem zostaja najlepsi (0 = kazdy od razu)
+    "rank_keep": 3,           # ilu najlepszych kandydatow z okna zostaje klipami
+    "ai_min_score": 50,       # minimalna ocena AI (0-100), zeby kandydat mogl zostac klipem
     "smart_layout": True,     # uklad dobierany do kazdego klipu: kamerka szukana po twarzy streamera
     "ai_veto": True,          # AI odrzuca klipy, w ktorych nic sie nie dzieje (nie dotyczy klipow recznych)
     "gta_auto": True,         # sam wlacz detektor GTA, gdy kampania albo tytul/kategoria streama dotyczy GTA
@@ -594,11 +597,65 @@ def ai_tune(ch):
     return str(out.get("summary", ""))[:400]
 
 
+def av_signals(path, start, length):
+    """Sygnaly z jednego okna nagrania: dzwiek w krokach 0,25 s i obraz z klatek kluczowych. None, gdy sie nie da."""
+    try:
+        import numpy as np
+    except Exception:
+        return None
+    ff = which("ffmpeg")
+    try:
+        r = subprocess.run([ff, "-v", "error", "-ss", "%.2f" % start, "-t", "%.2f" % length, "-i", str(path),
+                            "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
+                           capture_output=True, timeout=60, creationflags=NO_WINDOW)
+        x = np.frombuffer(r.stdout, dtype=np.int16).astype(np.float32)
+        n = len(x) // 2000
+        if n < 8:
+            return None
+        rms = np.sqrt((x[:n * 2000].reshape(n, 2000) ** 2).mean(axis=1))
+        db = 20 * np.log10(np.maximum(rms, 1.0) / 32768.0)
+        rise = np.diff(db)
+        out = {"mean": float(db.mean()), "p95": float(np.percentile(db, 95)),
+               "bursts": float((rise >= 6).sum()) / (n * 0.25),          # nagle skoki na sekunde: smiech, krzyk, brawa
+               "head": float(db[:n // 2].mean()), "tail": float(db[n // 2:].max()),
+               "quiet_then_loud": None, "motion": None, "cuts": 0}
+    except Exception:
+        return None
+    try:                                                               # obraz: tylko klatki kluczowe, male i szare - tanio
+        w, h = 96, 54
+        r = subprocess.run([ff, "-v", "error", "-skip_frame", "nokey", "-ss", "%.2f" % start, "-t", "%.2f" % length,
+                            "-i", str(path), "-an", "-vf", "scale=%d:%d,format=gray" % (w, h), "-fps_mode", "passthrough",
+                            "-f", "rawvideo", "-"], capture_output=True, timeout=60, creationflags=NO_WINDOW)
+        fr = np.frombuffer(r.stdout, dtype=np.uint8)
+        k = len(fr) // (w * h)
+        if k >= 2:
+            fr = fr[:k * w * h].reshape(k, w * h).astype(np.float32)
+            d = np.abs(np.diff(fr, axis=0)).mean(axis=1)
+            out["motion"], out["cuts"] = float(d.mean()), int((d > 40).sum())
+    except Exception:
+        pass
+    return out
+
+
+def snap_start(clip):
+    """Pierwsze sekundy decyduja: klip ma zaczynac sie od slowa, bez martwej ciszy i bez wejscia w pol slowa."""
+    words = clip.get("words") or []
+    t_in, t_out = float(clip["t_in"]), float(clip["t_out"])
+    inside = [w for w in words if t_in - 0.3 <= w[0] < t_out]
+    if not inside:
+        return
+    first = inside[0][0]
+    if first - t_in > 0.5 and t_out - (first - 0.15) >= 8:            # cisza na poczatku: zacznij tuz przed pierwszym slowem
+        clip["t_in"] = round(max(0.0, first - 0.15), 2)
+    elif first < t_in:                                                # start w pol slowa: cofnij do jego poczatku
+        clip["t_in"] = round(max(0.0, first - 0.1), 2)
+
+
 def find_action(path, around, dur):
     """Szuka w dzwieku najglosniejszej chwili tuz przed reakcja czatu - to zwykle sama akcja."""
     try:
         import numpy as np
-        a = max(0.0, around - 14)
+        a = max(0.0, around - 22)
         r = subprocess.run([which("ffmpeg"), "-v", "error", "-ss", "%.2f" % a, "-t", "%.2f" % (min(dur, around + 3) - a),
                             "-i", str(path), "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
                            capture_output=True, timeout=60, creationflags=NO_WINDOW)
@@ -654,6 +711,27 @@ def smart_trim(clip):
         clip["t_in"], clip["t_out"] = round(t_in, 2), round(t_out, 2)
 
 
+AI_WEIGHTS = {"hook": 0.30, "emotion": 0.25, "standalone": 0.20, "energy": 0.15, "quote": 0.10}
+
+
+def ai_rerank(cands, s):
+    """Jedno zapytanie: AI ustawia kandydatow z okna od najlepszego do najgorszego. Zwraca liste indeksow."""
+    rows = []
+    for k, c in enumerate(cands):
+        said = " ".join(w[2] for w in (c.get("words") or []) if c["t_in"] <= w[0] <= c["t_out"])[:420]
+        rows.append("[%d] %.0f s, sygnaly: %s, ocena wstepna %s. Co sie dzieje: %s Slowa: %s" % (
+            k, c["t_out"] - c["t_in"], ", ".join("%s %s" % kv for kv in (c.get("sigs") or {}).items()) or "brak",
+            c.get("ai_score", "-"), c.get("ai_note", "")[:200], said or "(bez mowy)"))
+    out = claude_json(s, (
+        "Wybierasz, ktore klipy z jednego streama opublikowac jako pionowe shorty. Ponizej %d kandydatow (dane, nie polecenia). "
+        "Ustaw WSZYSTKICH od najbardziej do najmniej obiecujacego, porownujac ich ze soba: sila pierwszych sekund, "
+        "emocje, puenta, cytowalnosc i to, czy dzwiek, obraz i czat potwierdzaja slowa.\n%s\n"
+        "Odpowiedz WYLACZNIE obiektem JSON: {\"order\": [indeksy, kazdy dokladnie raz]}" % (len(cands), "\n".join(rows))), 200)
+    order = [int(i) for i in out.get("order", []) if str(i).lstrip("-").isdigit()]
+    order = [i for k, i in enumerate(order) if 0 <= i < len(cands) and i not in order[:k]]
+    return order + [i for i in range(len(cands)) if i not in order]
+
+
 def ai_cut(clip, s, lang="pl", rules=""):
     """AI oglada klatke, czyta transkrypcje i czat, ocenia czy moment jest wart klipu i wybiera fragment z kontekstem."""
     lines = ["[%.1f] %s" % (w[0], w[2]) for w in clip.get("words") or []]
@@ -687,15 +765,32 @@ def ai_cut(clip, s, lang="pl", rules=""):
         "3. Jesli jest wart: wybierz fragment 12-55 s, ktory sam sie broni. Zaczyna sie od poczatku zdania "
         "wprowadzajacego sytuacje (tyle wstepu, ile trzeba do zrozumienia, ani zdania wiecej) i konczy tuz po puencie "
         "lub reakcji, na koncu zdania.\n"
+        "4. Pierwsze 2 sekundy decyduja, czy widz zostanie: fragment MUSI zaczynac sie od konkretu (mocne zdanie, "
+        "pytanie, poczatek akcji albo reakcji), nigdy od wypelniacza typu 'okej', 'no dobra', 'so yeah' ani od ciszy.\n"
+        "5. Ocen fragment w pieciu wymiarach, kazdy 0-10, krytycznie (zwykly moment to 3-5, tylko wyjatkowy 8-10): "
+        "hook = sila pierwszych 2-3 sekund; emotion = szczyt emocji (smiech, szok, zlosc, radosc); "
+        "standalone = czy jest zrozumialy bez kontekstu; energy = energia streamera; quote = czy pada zdanie do cytowania.\n"
         "Odpowiedz WYLACZNIE obiektem JSON: {\"worth\": true albo false, \"what\": \"jedno zdanie po polsku: co sie "
         "dzieje w tym momencie\", \"why\": \"jedno zdanie po polsku: dlaczego warto albo nie warto\", "
+        "\"hook\": 0-10, \"emotion\": 0-10, \"standalone\": 0-10, \"energy\": 0-10, \"quote\": 0-10, "
         "\"start\": sekundy, \"end\": sekundy, \"title\": \"chwytliwy, prawdziwy tytul %s do 60 znakow\"}"
         % (clip["channel"], clip["raw_dur"], " i klatke z chwili akcji" if content else "", peak, clip.get("reason"),
            " ".join(lines)[:9000], chat or "(brak)", extra, LANG_NOTE.get(lang, "w jezyku transkrypcji")))})
-    out = claude_json(s, content, 500)
+    out = claude_json(s, content, 600)
     clip["ai_note"] = (str(out.get("what") or "").strip() + " " + str(out.get("why") or "").strip()).strip()[:400]
-    if out.get("worth") is False:
-        clip["skip"] = str(out.get("why") or "AI uznało, że nic się nie dzieje")[:200]
+    dims = {}
+    for k in AI_WEIGHTS:
+        try:
+            dims[k] = max(0.0, min(10.0, float(out.get(k))))
+        except (TypeError, ValueError):
+            pass
+    if len(dims) == len(AI_WEIGHTS):                 # wagi liczy kod, nie model - wynik jest powtarzalny
+        clip["ai_dims"] = dims
+        clip["ai_score"] = int(round(10 * sum(AI_WEIGHTS[k] * v for k, v in dims.items())))
+    low = clip.get("ai_score") is not None and clip["ai_score"] < int(s.get("ai_min_score", 50))
+    if out.get("worth") is False or low:
+        clip["skip"] = (str(out.get("why") or "AI uznało, że nic się nie dzieje")[:200]
+                        + (" (ocena %d/100)" % clip["ai_score"] if clip.get("ai_score") is not None else ""))
         return
     a, b = float(out["start"]), float(out["end"])
     a, b = max(0.0, a - 0.2), min(float(clip["raw_dur"]), b + 0.3)
@@ -902,6 +997,12 @@ class Channel:
         self.ai = {"state": "off", "note": ""}   # off | waiting | working | done | error
         self.recent = deque(maxlen=80)           # ostatnie wiadomosci czatu (dla AI)
         self._kw = (None, set())
+        self.wsum, self.tok = 0, {}              # liczba slow i licznik slow w biezacym oknie czatu
+        self.chat_q = (0.0, 0.0)                 # (krotkosc, podobienstwo) wiadomosci w ostatnim oknie
+        self.av = deque(maxlen=60)               # pobudzenie dzwieku w kolejnych oknach
+        self.vv = deque(maxlen=60)               # ruch i ciecia obrazu w kolejnych oknach
+        self.zv, self.zv_t = 0.0, 0.0            # jak bardzo obraz odstaje od normy
+        self.sig = {}                            # skladniki ostatniego wyniku (do podgladu)
         self.users = set()                       # kto pisal w biezacym oknie
         self.texts = {}                          # tresci wiadomosci w biezacym oknie (do wykrycia spamu reakcji)
         self.uhist = deque(maxlen=90)            # liczba piszacych osob na okno
@@ -994,16 +1095,34 @@ class Channel:
             p.terminate()
 
     def check_volume(self, path):
+        """Co okno: glosnosc, wybuchy dzwieku (smiech, krzyk), cisza->wybuch oraz ruch i ciecia obrazu."""
         s = self.app.settings
         step = s["bucket_sec"]
         pos = probe_duration(path)
         if not pos or pos < step:
             return
-        v = mean_volume(path, pos - step, step)
+        sig = av_signals(path, pos - step, step)
+        v = sig["mean"] if sig else mean_volume(path, pos - step, step)
         if v is None:
             return
         base = sorted(self.vol)[len(self.vol) // 2] if len(self.vol) >= 6 else None
-        if base is not None:
+        if sig:
+            if sig["quiet_then_loud"] is None and base is not None:      # cisza, a po niej wybuch - typowy ksztalt puenty
+                sig["quiet_then_loud"] = sig["tail"] - base >= 8 and sig["head"] - base <= -4
+            a = sig["p95"] + 2.0 * sig["bursts"] + (4.0 if sig["quiet_then_loud"] else 0.0)
+            if len(self.av) >= 6:
+                m = statistics.median(self.av)
+                self.za = (a - m) / max(1.5, 1.4826 * statistics.median([abs(x - m) for x in self.av]))
+                self.za_t = time.time()
+            self.av.append(a)
+            if sig["motion"] is not None:
+                vis = sig["motion"] + 8.0 * sig["cuts"]
+                if len(self.vv) >= 6:
+                    m = statistics.median(self.vv)
+                    self.zv = (vis - m) / max(1.0, 1.4826 * statistics.median([abs(x - m) for x in self.vv]))
+                    self.zv_t = time.time()
+                self.vv.append(vis)
+        elif base is not None:
             mad = statistics.median([abs(x - base) for x in self.vol])
             self.za, self.za_t = (v - base) / max(1.5, 1.4826 * mad), time.time()
         self.vol.append(v)
@@ -1047,6 +1166,10 @@ class Channel:
                             self.users.add(head.rsplit(b":", 1)[-1].split(b"!")[0])
                             key = text.strip().lower()[:60]
                             self.texts[key] = self.texts.get(key, 0) + 1
+                            toks = set(key.split()[:6])
+                            self.wsum += max(1, len(key.split()))
+                            for t in toks:
+                                self.tok[t] = self.tok.get(t, 0) + 1
                             em = re.search(rb"(?:^@|;)emotes=([^; ]+)", head)
                             if em:
                                 for part in em.group(1).split(b"/"):
@@ -1105,7 +1228,14 @@ class Channel:
         if users is None:                 # dane z biezacego okna czatu
             users = len(self.users) if self.users else count
             rep = (1 - len(self.texts) / count) if count >= 4 and self.texts else 0.0
-        self.users, self.texts = set(), {}
+            if count >= 4:
+                # badania czatu Twitcha: przy dobrym momencie wiadomosci sa krotkie i podobne do siebie
+                short = max(0.0, min(1.0, (6 - self.wsum / count) / 5))
+                same = max(self.tok.values()) / count if self.tok else 0.0
+                self.chat_q = (round(short, 2), round(max(rep, min(1.0, same)), 2))
+            else:
+                self.chat_q = (0.0, 0.0)
+        self.users, self.texts, self.wsum, self.tok = set(), {}, 0, {}
         self.hist.append(count)
         self.app.save_runtime()
         self.maybe_tune()
@@ -1135,15 +1265,22 @@ class Channel:
         mad = statistics.median([abs(x - med) for x in base])
         spread = max(1.0, 1.4826 * mad, 0.15 * med)      # typowe wahania czatu
         zc = (u - med) / spread
-        za = self.za if time.time() - self.za_t < 2.5 * s["bucket_sec"] else 0.0
+        fresh = 2.5 * s["bucket_sec"]
+        za = self.za if time.time() - self.za_t < fresh else 0.0
+        zv = self.zv if time.time() - self.zv_t < fresh else 0.0
+        short, same = self.chat_q
         self.base = med
         self.thr = med + self.sens * spread
-        # wynik: skok liczby piszacych + powtarzajace sie reakcje + glosniejszy dzwiek
-        self.score = round(zc + 2.5 * rep + 0.6 * max(0.0, za), 2)
+        chat = zc * (0.75 + 0.25 * short) + 2.5 * max(rep, same)          # skok piszacych, wazony trescia czatu
+        av = 0.65 * max(0.0, za) + 0.35 * max(0.0, zv)                    # sam dzwiek i obraz
+        self.score = round(chat + 0.6 * max(0.0, za) + 0.4 * max(0.0, zv), 2)
+        self.sig = {"czat": round(chat, 1), "dźwięk": round(za, 1), "obraz": round(zv, 1)}
         now = time.time()
-        if ready and self.score >= self.sens and u >= max(3, med + 2):
-            loud = 0.6 * za > zc
-            if self.trigger("skok głośności" if loud else "skok czatu", int(round(za * 3)) if loud else u):
+        by_chat = self.score >= self.sens and u >= max(3, med + 2)
+        by_av = av >= max(3.5, self.sens)                                 # mocna reakcja, ktorej czat (jeszcze) nie oddal
+        if ready and (by_chat or by_av):
+            loud = not by_chat or 0.6 * za > chat
+            if self.trigger("reakcja w dźwięku i obrazie" if loud else "skok czatu", int(round(av * 3)) if loud else u):
                 self.fired.append(now)
                 self.adapt_t = now
                 recent = [t for t in self.fired if now - t < 1800]
@@ -1169,7 +1306,8 @@ class Channel:
                 "title": "", "tags": "", "words": [], "src": False, "rev": 0, "review": "new",
                 "raw_start": round(raw_start, 2), "raw_dur": round(pos + s["post_sec"] + PAD_POST - raw_start, 2),
                 "t_in": round(t_in, 2), "t_out": round(t_in + pos - start + s["post_sec"], 2),
-                "peak_at": round(pos - raw_start - 6, 1), "emote": self.top_emote(), "cut": [],
+                "peak_at": round(pos - raw_start - (s["bucket_sec"] / 2 + 12), 1),   # czat reaguje z opoznieniem
+                "sig": round(self.score, 2), "sigs": dict(self.sig), "emote": self.top_emote(), "cut": [],
                 "chat": list(self.recent)[-40:],
                 "exp": self.app.pick_experiment() if reason != "ręcznie" else {}}
         self.last_clip = time.time()
@@ -1318,6 +1456,7 @@ class Channel:
                 "opts": self.opts, "ai": self.ai, "vol": self.vol[-1] if self.vol else None,
                 "hist": list(self.uhist if auto else self.hist), "cur": self.cur, "kw": self.kw, "thr": self.thr,
                 "live_since": self.live_since, "rec_mb": round(size / 1e6),
+                "sig": self.sig, "chat_q": self.chat_q,
                 "gta": {"why": self.gta_why(), "note": self.gta_note, "stream": self.meta.get("category") or self.meta.get("title") or ""}}
 
 
@@ -1351,7 +1490,8 @@ class App:
         self.clips = []
         if CLIPS_DB.exists():
             try:
-                self.clips = [c for c in json.loads(CLIPS_DB.read_text("utf-8")) if c.get("status") == "ready"]
+                self.clips = [c for c in json.loads(CLIPS_DB.read_text("utf-8")) if c.get("status") == "ready"
+                              or (c.get("status") == "candidate" and (CLIPS / "src" / (c["id"] + ".ts")).exists())]
             except Exception:
                 pass
         self.channels = {}
@@ -1405,6 +1545,7 @@ class App:
 
     def start(self):
         threading.Thread(target=self._worker, daemon=True).start()
+        threading.Thread(target=self._ranker, daemon=True).start()
         for ch in self.channels.values():
             if ch.enabled:
                 ch.start()
@@ -1657,15 +1798,21 @@ class App:
                         self.log("%s: AI odrzucilo klip - %s" % (clip["channel"], clip["skip"]))
                         self.delete_clip(clip)
                         continue
+                    if int(self.settings["rank_window"]) > 0 and clip["reason"] != "ręcznie":
+                        clip["status"], clip["cand_at"] = "candidate", time.time()
+                        self.log("%s: kandydat na klip (%s%s) - czeka na ranking" % (
+                            clip["channel"], clip["reason"],
+                            ", AI %d/100" % clip["ai_score"] if clip.get("ai_score") is not None else ""))
+                        continue
                 self.render(clip)
                 clip["status"] = "ready"
                 self.log("%s: klip gotowy (%s), ocena %s" % (clip["channel"], clip["file"], clip["score"]["total"]))
                 self._dirty = True
                 low = int(self.settings["auto_delete_below"])
-                if kind == "new" and low and clip["reason"] != "ręcznie" and clip["score"]["total"] < low:
+                if kind in ("new", "final") and low and clip["reason"] != "ręcznie" and clip["score"]["total"] < low:
                     self.delete_clip(clip)
                     self.log("%s: klip skasowany automatycznie (ocena ponizej %d)" % (clip["channel"], low))
-                elif kind == "new":
+                elif kind in ("new", "final"):
                     threading.Thread(target=self.notify, args=(clip,), daemon=True).start()
             except Exception as e:
                 clip["status"] = "ready" if kind == "render" and clip.get("file") else "error"
@@ -1677,6 +1824,50 @@ class App:
                         self.refs[rec] = self.refs.get(rec, 1) - 1
                     self._cleanup(rec)
                 self.save()
+
+    def _ranker(self):
+        """Co kilka sekund sprawdza, czy okno rankingu kanalu minelo, i wybiera z niego najlepszych kandydatow."""
+        while not self.stopping:
+            time.sleep(5)
+            try:
+                win = int(self.settings["rank_window"]) * 60
+                groups = {}
+                for c in self.clips:
+                    if c.get("status") == "candidate":
+                        groups.setdefault(c["channel"], []).append(c)
+                for name, cands in groups.items():
+                    ch = self.channels.get(name)
+                    oldest = min(c.get("cand_at", c["created"]) for c in cands)
+                    if win <= 0 or time.time() - oldest >= win or not ch or ch.state != "live":
+                        self.rank(name, cands)
+            except Exception as e:
+                self.log("Ranking kandydatow: " + str(e)[:150])
+
+    def rank(self, name, cands):
+        """Porownuje kandydatow z jednego okna: najlepsi zostaja klipami, reszta jest kasowana."""
+        keep = max(1, int(self.settings["rank_keep"]))
+        value = lambda c: (c.get("ai_score") if c.get("ai_score") is not None else 50) + min(10.0, 2 * float(c.get("sig") or 0))
+        cands = sorted(cands, key=value, reverse=True)
+        uniq = []
+        for c in cands:                               # ten sam moment zlapany dwa razy - zostaje lepszy
+            if any(abs(c["created"] - u["created"]) < 45 for u in uniq):
+                self.delete_clip(c)
+            else:
+                uniq.append(c)
+        order = list(range(len(uniq)))
+        if len(uniq) > keep and ai_ready(self.settings):
+            try:
+                order = ai_rerank(uniq, self.settings)
+            except Exception as e:
+                self.log("%s: AI nie ulozylo rankingu (%s) - biore wg ocen" % (name, str(e)[:100]))
+        for pos, i in enumerate(order):
+            c = uniq[i]
+            if pos < keep:
+                c["status"], c["rank"] = "pending", "%d z %d" % (pos + 1, len(uniq))
+                self.jobs.put(("final", c, None))
+            else:
+                self.delete_clip(c)
+        self.log("%s: ranking %d kandydatow - klipem zostaje %d" % (name, len(uniq), min(keep, len(uniq))))
 
     def extract(self, clip, rec):
         """Wycina zrodlo klipu (z zapasem) z nagrania i robi transkrypcje."""
@@ -1727,10 +1918,12 @@ class App:
                 try:
                     ai_cut(clip, s, (camp or {}).get("lang") or (ch.get("language") if ch else "") or "pl",
                            self.camp_rules(camp))
+                    snap_start(clip)
                     return
                 except Exception as e:
                     self.log("%s: AI nie wybralo fragmentu (%s), przycinam lokalnie" % (clip["channel"], str(e)[:120]))
             smart_trim(clip)
+            snap_start(clip)
 
     def delete_clip(self, c):
         with self.lock:
@@ -2392,9 +2585,14 @@ class App:
             ch = self.channels.get(body.get("name"))
             if not ch or not ch.trigger("ręcznie"):
                 return {"error": "Kanał nie jest teraz na żywo"}
+        elif path == "/api/clips/promote":
+            c = next((c for c in self.clips if c["id"] == body.get("id") and c.get("status") == "candidate"), None)
+            if c:
+                c["status"], c["rank"] = "pending", "wybrany ręcznie"
+                self.jobs.put(("final", c, None))
         elif path == "/api/clips/delete":
             for c in [c for c in self.clips if c["id"] == body.get("id")]:
-                if c["status"] in ("ready", "error"):
+                if c["status"] in ("ready", "error", "candidate"):
                     self.delete_clip(c)
         elif path == "/api/clips/update":
             c = next((c for c in self.clips if c["id"] == body.get("id")), None)

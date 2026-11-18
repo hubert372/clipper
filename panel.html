@@ -317,7 +317,7 @@ function vChannels() {
       c.ai.state === 'done' ? 'AI dobrało ustawienia. ' + esc(c.ai.note) : c.ai.state === 'error' ? 'AI nie dobrało ustawień: ' + esc(c.ai.note)
       : c.ai.state === 'working' ? 'AI analizuje kanał…' : 'AI czeka, aż kanał będzie na żywo i zbierze 2 minuty czatu.'}</div>`}
     <div class="sub" style="margin-bottom:8px">${c.gta.why ? `<span style="color:var(--mint)">Detektor GTA działa</span> (${esc(c.gta.why)})${c.gta.note ? '. Ostatnio: ' + esc(c.gta.note) : c.state === 'live' ? '. Słucham streamera.' : '. Ruszy, gdy kanał będzie na żywo.'}` : 'Detektor GTA wyłączony' + (c.gta.stream ? ' (stream: ' + esc(c.gta.stream) + ')' : '')}</div>
-    <div class="row"><div class="sub grow">${c.enabled ? (c.chat ? (c.auto ? `${last} osób pisze, wynik ${c.score.toFixed(1)} z ${c.sens.toFixed(1)}` + (c.thr ? '' : ', uczę się czatu') : `${last} wiad. w oknie` + (c.thr ? `, próg ${Math.round(c.thr)}` : ', zbieram średnią')) : 'Łączę z czatem…') : ''}</div>
+    <div class="row"><div class="sub grow">${c.enabled ? (c.chat ? (c.auto ? `${last} osób pisze, wynik ${c.score.toFixed(1)} z ${c.sens.toFixed(1)}` + (c.sig && c.sig.czat != null ? ` (czat ${c.sig.czat}, dźwięk ${c.sig['dźwięk']}, obraz ${c.sig.obraz})` : '') + (c.thr ? '' : ', uczę się czatu') : `${last} wiad. w oknie` + (c.thr ? `, próg ${Math.round(c.thr)}` : ', zbieram średnią')) : 'Łączę z czatem…') : ''}</div>
       <button class="b" ${c.state === 'live' ? '' : 'disabled'} onclick="post('/api/clip',{name:'${c.name}'})">Klip teraz</button>
       <button class="b" onclick="chOpts('${c.name}')">Opcje</button>
       <button class="link bad" onclick="if(confirm('Usunąć kanał ${c.name}?'))post('/api/channels/remove',{name:'${c.name}'})">Usuń</button></div></div>`; }).join('') ||
@@ -384,7 +384,7 @@ function vMonitor() {
 function clipCard(c) {
   const sc = total(c);
   const body = c.status === 'ready' ? `<div class="thumb" tabindex="0" role="button" aria-label="Otwórz klip" onclick="openClip('${c.id}')" onkeydown="if(event.key==='Enter')openClip('${c.id}')"><video src="${src(c)}#t=0.5" preload="metadata" muted playsinline></video><span class="play">▶</span></div>`
-    : `<div class="ph">${c.status === 'error' ? 'Nie udało się: ' + esc(c.error || '') : c.status === 'processing' ? 'Renderuję…' : 'Czekam na dalszy ciąg…'}</div>`;
+    : `<div class="ph">${c.status === 'error' ? 'Nie udało się: ' + esc(c.error || '') : c.status === 'processing' ? 'Renderuję…' : c.status === 'candidate' ? `Kandydat${c.ai_score != null ? ', AI ' + c.ai_score + '/100' : ''}. Czeka na ranking.<br>${esc(c.ai_note || '')}<br><button class="b" style="margin-top:8px" onclick="post('/api/clips/promote',{id:'${c.id}'})">Zrób klip teraz</button>` : 'Czekam na dalszy ciąg…'}</div>`;
   return `<div class="card clip">${body}${sc != null && c.status === 'ready' ? `<span class="badge ${cls(c.pot ?? sc)}" title="Potencjał: ocena skorygowana o to, co dotąd dawało wyświetlenia">${c.pot ?? sc}</span>` : ''}<div class="meta">
     <div class="t" title="${esc(c.title)}">${esc(c.title || c.channel)}</div>
     ${c.status === 'ready' ? `<span class="tag ${c.review === 'ok' ? 'ok' : ''}">${c.review === 'ok' ? 'zatwierdzony' : 'do przejrzenia'}</span>` : ''}<div class="sub">${esc(c.channel)}, ${when(c.created)}, ${esc(c.reason)}</div>
@@ -393,7 +393,7 @@ function clipCard(c) {
     <div class="row wrap" style="margin-top:8px;gap:12px">${c.status === 'ready' ? `<button class="link" onclick="go('rating','${c.id}')">Ocena</button>
       ${c.src ? `<button class="link" onclick="go('editor','${c.id}')">Edytuj</button>` : ''}<a class="link" href="${src(c)}" download="${esc(c.file)}">Pobierz</a>
       <button class="link" onclick="copyDesc('${c.id}')">Kopiuj opis</button>` : ''}
-      ${c.status === 'ready' || c.status === 'error' ? `<button class="link bad" onclick="if(confirm('Usunąć ten klip?'))post('/api/clips/delete',{id:'${c.id}'})">Usuń</button>` : ''}</div></div></div>`;
+      ${c.status === 'ready' || c.status === 'error' || c.status === 'candidate' ? `<button class="link bad" onclick="if(confirm('Usunąć ten klip?'))post('/api/clips/delete',{id:'${c.id}'})">Usuń</button>` : ''}</div></div></div>`;
 }
 let viewId = null, uiMode = '';
 // przyblizone obszary zasloniete przez interfejs aplikacji: [gora, dol, prawa kolumna] w % kadru
@@ -412,7 +412,7 @@ function drawSide() {
   const sc = c.score || {total: 0, parts: [], tips: []}, shut = "$('clipdlg').close();";
   setHtml(box, `<div class="row"><div class="name grow">${esc(c.title || c.channel)}</div><button class="link" onclick="${shut}">Zamknij</button></div>
     <div class="sub" style="margin:4px 0 10px">${esc(c.channel)}, ${when(c.created)}, ${c.len || '?'} s, ${esc(c.reason)}${c.layout ? ', układ: ' + esc(c.layout) : ''}</div>
-    ${c.ai_note ? `<div class="sub" style="margin:-4px 0 10px;color:var(--text)">AI: ${esc(c.ai_note)}</div>` : ''}
+    ${c.ai_note ? `<div class="sub" style="margin:-4px 0 10px;color:var(--text)">AI${c.ai_score != null ? ' ' + c.ai_score + '/100' : ''}${c.rank ? ', ranking: ' + esc(c.rank) : ''}: ${esc(c.ai_note)}${c.ai_dims ? `<br>haczyk ${c.ai_dims.hook}, emocje ${c.ai_dims.emotion}, zrozumiałość ${c.ai_dims.standalone}, energia ${c.ai_dims.energy}, cytat ${c.ai_dims.quote}` : ''}</div>` : ''}
     <span class="tag ${c.review === 'ok' ? 'ok' : ''}">${c.review === 'ok' ? 'zatwierdzony' : 'do przejrzenia'}</span>
     ${c.score ? `<div class="row" style="margin:14px 0 6px"><b class="num ${cls(sc.total)}" style="font-size:34px">${sc.total}</b><span class="sub">ocena na 100</span></div>` : ''}
     ${sc.parts.map(p => `<div class="part"><span>${esc(p.name)}</span><div class="bar"><b style="width:${p.score / p.max * 100}%"></b></div><span class="num sub">${p.score}/${p.max}</span></div>`).join('')}
@@ -621,7 +621,7 @@ const FIELDS = [
     ['kw_color', 'Kolor wyróżnionych słów', 'color'], ['silence_gap', 'Wycinaj ciszę dłuższą niż (s)', 'num', 0.5], ['game_zoom', 'Przybliżenie gry w układzie z kamerką (1 = cały obraz)', 'num', 0.05],
     ['audio_db', 'Skok głośności: o ile dB ponad zwykły poziom', 'num', 1], ['auto_delete_below', 'Kasuj klipy z oceną poniżej (0 = nie kasuj)', 'num', 1]]],
   ['AI (ocena klipów i dobór ustawień kanału)', [['ai_mode', 'Skąd AI', 'sel', [['api', 'Klucz API Anthropic'], ['cli', 'Claude Code (logowanie kontem Claude)']]],
-    ['auto_ai_tune', 'AI samo dobiera opcje każdego kanału raz na dobę', 'bool'], ['ai_veto', 'AI odrzuca klipy, w których nic się nie dzieje', 'bool'], ['smart_layout', 'Układ dobierany do każdego klipu (kamerka szukana po twarzy)', 'bool'], ['gta_auto', 'Detektor GTA włącza się sam, gdy kampania lub stream dotyczy GTA', 'bool'], ['ai_cut_all', 'AI wybiera fragment i tytuł każdego klipu', 'bool'],
+    ['auto_ai_tune', 'AI samo dobiera opcje każdego kanału raz na dobę', 'bool'], ['rank_window', 'Ranking: porównuj kandydatów z tylu minut (0 = każdy od razu jest klipem)', 'num', 1], ['rank_keep', 'Ranking: ilu najlepszych z okna zostaje klipami', 'num', 1], ['ai_min_score', 'Minimalna ocena AI kandydata (0-100)', 'num', 1], ['ai_veto', 'AI odrzuca klipy, w których nic się nie dzieje', 'bool'], ['smart_layout', 'Układ dobierany do każdego klipu (kamerka szukana po twarzy)', 'bool'], ['gta_auto', 'Detektor GTA włącza się sam, gdy kampania lub stream dotyczy GTA', 'bool'], ['ai_cut_all', 'AI wybiera fragment i tytuł każdego klipu', 'bool'],
     ['ai_key', 'Klucz API (tylko dla trybu z kluczem)', 'pass'], ['ai_model', 'Model (tylko dla trybu z kluczem)', 'text']]],
 ];
 // pola widoczne tylko wtedy, gdy ma to sens (np. styl napisow tylko przy wlaczonych napisach)
