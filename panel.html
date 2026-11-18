@@ -527,10 +527,14 @@ function vPublish() {
   const list = ready().filter(c => c.review === 'ok');
   const left = c => PLAT.filter(([k]) => !((c.pub || {})[k] || {}).done).length;
   list.sort((a, b) => (left(b) > 0) - (left(a) > 0) || (b.pot ?? 0) - (a.pot ?? 0) || b.created - a.created);
-  return `<h1>Publikacja</h1><p class="lead">Zatwierdzone klipy z gotowym opisem na każdą platformę. Skopiuj opis, wrzuć klip, odhacz i po czasie wpisz wyświetlenia.</p>
+  return `<h1>Publikacja</h1><p class="lead">Zatwierdzone klipy z gotowym opisem na każdą platformę. Zeskanuj kod, pobierz klip na telefon, wklej opis, wrzuć i odhacz.</p>
   ${list.map(c => `<div class="card" style="margin-bottom:14px"><div class="row wrap"><button class="link name" onclick="openClip('${c.id}')">${esc(c.title || c.channel)}</button>
       <span class="sub grow">${esc(c.channel)}, ${when(c.created)}</span><a class="b" style="text-decoration:none" href="${src(c)}" download="${esc(c.file)}">Pobierz klip</a>
-      ${S.deps.ai ? `<button class="b" onclick="this.disabled=true;this.textContent='Piszę…';post('/api/clips/posts-ai',{id:'${c.id}'}).then(r=>{if(!r.error)toast('Opisy gotowe')})">Napisz opisy przez AI</button>` : ''}</div>
+      ${c.posts_ai === 'working' ? '<span class="sub">AI pisze opisy…</span>' : S.deps.ai ? `<button class="b" onclick="this.disabled=true;this.textContent='Piszę…';post('/api/clips/posts-ai',{id:'${c.id}'}).then(r=>{if(!r.error)toast('Opisy gotowe')})">${c.posts_ai === 'done' ? 'Napisz opisy ponownie' : 'Napisz opisy przez AI'}</button>` : ''}</div>
+    ${c.posts_ai === 'error' ? '<div class="sub" style="color:var(--hot);margin-top:8px">AI nie napisało opisów, poniżej są opisy podstawowe. Spróbuj ponownie przyciskiem obok.</div>' : !S.deps.ai ? '<div class="sub" style="margin-top:8px">To opisy podstawowe. Połącz AI w Ustawieniach, a po zatwierdzeniu klipu napisze je za Ciebie.</div>' : ''}
+    <div class="row wrap" style="margin-top:12px;gap:14px;align-items:center">${S.phone.url
+      ? `<img src="/api/qr?id=${c.id}" alt="Kod QR do klipu" style="width:120px;height:120px;background:#fff;padding:5px;border-radius:10px"><div class="sub grow">Zeskanuj telefonem w tej samej sieci Wi-Fi. Otworzy się strona tylko z tym klipem: pobranie pliku i opisy do skopiowania na każdą platformę.</div>`
+      : `<button class="b" onclick="post('/api/settings',{phone_access:true}).then(()=>refresh(true))">Pokaż kod QR na telefon</button><div class="sub grow">Włącza dostęp do zatwierdzonych klipów dla urządzeń w Twojej sieci Wi-Fi, po tajnym adresie.</div>`}</div>
     ${c.risk ? `<div class="sub" style="color:var(--hot);margin-top:8px">Uwaga AI: ${esc(c.risk)}</div>` : ''}
     ${c.camp ? campChecks(c) : ''}
     ${PLAT.map(([k, t]) => { const p = (c.pub || {})[k] || {}, txt = (c.posts || {})[k] || '';
@@ -773,7 +777,7 @@ function sync(a, b, depth) {
 function setHtml(el, h) { if (el && el._h !== h) { el._h = h; el.innerHTML = h; } }
 function draw(force) {
   if (!S) return;
-  const s2 = S.clips.map(c => c.id + c.status + (c.rev || 0) + (c.title || '') + (c.ai ? 1 : 0) + (c.review || '')).join();
+  const s2 = S.clips.map(c => c.id + c.status + (c.rev || 0) + (c.title || '') + (c.ai ? 1 : 0) + (c.review || '') + (c.posts_ai || '')).join() + (S.phone.url ? 1 : 0);
   if (!force && !LIVE[view] && (s2 === sig || view === 'settings' || view === 'editor' || view === 'publish' || view === 'campaigns')) return;
   sig = s2;
   const log = $('log'), top = log ? log.scrollTop : null;
