@@ -2674,9 +2674,10 @@ def main():
         pass
     finally:
         app.stopping = True
+        app.save()                              # najpierw zapis: zatrzymanie nie moze zapisac kanalow jako wylaczonych
+        app.save_runtime(True)
         for ch in app.channels.values():
-            ch.stop()
-        app.save()
+            ch.halt()                           # konczy nagrywanie, ale kanal zostaje wlaczony
         srv.server_close()
         if app.restart:
             relaunch()
