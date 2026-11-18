@@ -532,6 +532,7 @@ function vPublish() {
       <span class="sub grow">${esc(c.channel)}, ${when(c.created)}</span><a class="b" style="text-decoration:none" href="${src(c)}" download="${esc(c.file)}">Pobierz klip</a>
       ${c.posts_ai === 'working' ? '<span class="sub">AI pisze opisy…</span>' : S.deps.ai ? `<button class="b" onclick="this.disabled=true;this.textContent='Piszę…';post('/api/clips/posts-ai',{id:'${c.id}'}).then(r=>{if(!r.error)toast('Opisy gotowe')})">${c.posts_ai === 'done' ? 'Napisz opisy ponownie' : 'Napisz opisy przez AI'}</button>` : ''}</div>
     ${c.posts_ai === 'error' ? '<div class="sub" style="color:var(--hot);margin-top:8px">AI nie napisało opisów, poniżej są opisy podstawowe. Spróbuj ponownie przyciskiem obok.</div>' : !S.deps.ai ? '<div class="sub" style="margin-top:8px">To opisy podstawowe. Połącz AI w Ustawieniach, a po zatwierdzeniu klipu napisze je za Ciebie.</div>' : ''}
+    <div class="row" style="margin-top:10px"><input type="text" class="grow" placeholder="Notatka do tego klipu dla AI, np. wspomnij o wyścigu, bez przekleństw" value="${esc(c.note || '')}" onchange="post('/api/clips/note',{id:'${c.id}',note:this.value})"></div>
     <div class="row wrap" style="margin-top:12px;gap:14px;align-items:center">${S.phone.url
       ? `<img src="/api/qr?id=${c.id}" alt="Kod QR do klipu" style="width:120px;height:120px;background:#fff;padding:5px;border-radius:10px"><div class="sub grow">Zeskanuj telefonem w tej samej sieci Wi-Fi. Otworzy się strona tylko z tym klipem: pobranie pliku i opisy do skopiowania na każdą platformę.</div>`
       : `<button class="b" onclick="post('/api/settings',{phone_access:true}).then(()=>refresh(true))">Pokaż kod QR na telefon</button><div class="sub grow">Włącza dostęp do zatwierdzonych klipów dla urządzeń w Twojej sieci Wi-Fi, po tajnym adresie.</div>`}</div>
@@ -734,7 +735,17 @@ function editCamp(c) { campEdit = c; const d = $('campdlg');
     <div class="field"><span>Kampania aktywna</span><button type="button" class="sw ${c.active !== false ? 'on' : ''}" data-c="active" onclick="this.classList.toggle('on')"></button></div>
     <h2>Kanały w tej kampanii</h2><div class="row wrap">${S.channels.map(ch => `<label class="row sub" style="gap:6px"><input type="checkbox" data-ch="${ch.name}" ${(c.channels || []).includes(ch.name) ? 'checked' : ''}>${esc(ch.name)}</label>`).join('') || '<span class="sub">Najpierw dodaj kanał w zakładce Kanały.</span>'}</div>
     <h2>Wymagania i zakazy</h2><p class="sub" style="margin-bottom:6px">AI sprawdza każdy klip z tej kampanii pod kątem tych zasad.</p><textarea data-c="rules" style="width:100%;min-height:120px">${esc(c.rules || '')}</textarea>
+    <h2>Notatki i brief</h2><p class="sub" style="margin-bottom:6px">Własne uwagi albo treść briefu. AI czyta je przy cięciu klipu i pisaniu opisów. Możesz wkleić link, np. do Dokumentu Google.</p>
+    <div class="row" style="margin-bottom:8px"><input type="text" id="c_scan" class="grow" placeholder="https://docs.google.com/document/…"><button class="b" onclick="scanCamp(this)">Wczytaj z linku</button></div>
+    <textarea data-c="notes" style="width:100%;min-height:120px">${esc(c.notes || '')}</textarea>
     <div class="row" style="margin-top:14px"><span class="grow"></span><button class="b go" onclick="saveCamp()">Zapisz kampanię</button></div>`; d.showModal(); }
+async function scanCamp(btn) { const url = $('c_scan').value.trim(); if (!url) return toast('Wklej link do briefu');
+  btn.disabled = true; btn.textContent = 'Czytam…'; const r = await post('/api/campaigns/scan', {url}); btn.disabled = false; btn.textContent = 'Wczytaj z linku';
+  if (r.error) return;
+  const n = document.querySelector('#campdlg [data-c=notes]'), ru = document.querySelector('#campdlg [data-c=rules]');
+  n.value = (n.value.trim() ? n.value.trim() + '\n\n' : '') + r.notes;
+  if (r.rules) ru.value = (ru.value.trim() ? ru.value.trim() + '\n' : '') + r.rules;
+  toast(r.rules ? 'Brief wczytany, AI dopisało wymagania. Sprawdź i zapisz.' : 'Brief wczytany do notatek. Zapisz kampanię.'); }
 async function saveCamp() { const c = Object.assign({}, campEdit);
   document.querySelectorAll('#campdlg [data-c]').forEach(e => { c[e.dataset.c] = e.classList.contains('sw') ? e.classList.contains('on') : e.value; });
   c.channels = [...document.querySelectorAll('#campdlg [data-ch]')].filter(e => e.checked).map(e => e.dataset.ch);
