@@ -201,7 +201,7 @@ const total = c => c.score ? c.score.total : null;
 const src = c => '/clips/' + encodeURIComponent(c.file || '') + '?v=' + (c.rev || 0);
 const clip = id => S.clips.find(c => c.id === id);
 
-function reveal() { const m = $('view'); m.classList.remove('reveal'); void m.offsetWidth; m.classList.add('reveal'); }
+function reveal() { const m = $('view'); m.classList.remove('reveal'); void m.offsetWidth; m.classList.add('reveal'); clearTimeout(reveal.t); reveal.t = setTimeout(() => m.classList.remove('reveal'), 900); }
 function go(v, id) { setTimeout(reveal); view = v; try { localStorage.setItem('clipper_view', v); } catch {} if (id) sel = id; sig = ''; drawNav(); draw(true); $('view').scrollTop = 0; }
 let updating = '';
 async function checkUpdate() {
@@ -280,14 +280,13 @@ function vHome() {
 function drawNav() {
   const live = S ? S.channels.filter(c => c.state === 'live').length : 0;
   const last = S && S.clips.find(c => c.status === 'ready');
-  $('nav').innerHTML = '<div class="brand"><i></i>Clipper</div><div class="tabs">' +
+  setHtml($('nav'), '<div class="brand"><i></i>Clipper</div><div class="tabs">' +
     VIEWS.map(([k, t]) => { const n = k === 'channels' ? live : k === 'clips' && S ? ready().filter(c => c.review === 'new').length : 0;
       return `<button class="${k === view ? 'on' : ''}" onclick="go('${k}')">${t}${n ? `<span class="n">${n}</span>` : ''}</button>`; }).join('') + '</div>' +
     (S ? `<div class="status"><div class="cpick">${campButton()}${menuOpen ? campMenu() : ''}</div><span class="chip ${S.paused ? '' : 'ok'}">${S.paused ? 'Wstrzymany' : 'Działa'}</span>
       <span class="chip" title="Kanały na żywo">Na żywo ${live}/${S.channels.length}</span><span class="chip" title="Ostatni klip: ${last ? when(last.created) : 'brak'}">Kolejka ${S.queue}</span>
-      <button class="b ${S.paused ? 'go' : ''}" onclick="post('/api/pause',{paused:${!S.paused}})">${S.paused ? 'Start' : 'Pauza'}</button></div>` : '');
-  if (document.activeElement && document.activeElement.closest && document.activeElement.closest('nav select')) return;
-  $('foot').innerHTML = `${S ? 'Wersja ' + esc(S.version) : ''}<button class="b" ${updating ? 'disabled' : ''} onclick="checkUpdate()">${updating || 'Sprawdź aktualizacje'}</button>`;
+      <button class="b ${S.paused ? 'go' : ''}" onclick="post('/api/pause',{paused:${!S.paused}})">${S.paused ? 'Start' : 'Pauza'}</button></div>` : ''));
+  setHtml($('foot'), `${S ? 'Wersja ' + esc(S.version) : ''}<button class="b" ${updating ? 'disabled' : ''} onclick="checkUpdate()">${updating || 'Sprawdź aktualizacje'}</button>`);
   if (S && document.documentElement.dataset.theme !== S.settings.theme) { document.documentElement.dataset.theme = S.settings.theme; if (window.bgPaint) window.bgPaint(); }
 }
 
@@ -410,7 +409,7 @@ function drawSide() {
   const box = $('clipside'); if (!box || !viewId) return;
   const c = clip(viewId); if (!c) return $('clipdlg').close();
   const sc = c.score || {total: 0, parts: [], tips: []}, shut = "$('clipdlg').close();";
-  box.innerHTML = `<div class="row"><div class="name grow">${esc(c.title || c.channel)}</div><button class="link" onclick="${shut}">Zamknij</button></div>
+  setHtml(box, `<div class="row"><div class="name grow">${esc(c.title || c.channel)}</div><button class="link" onclick="${shut}">Zamknij</button></div>
     <div class="sub" style="margin:4px 0 10px">${esc(c.channel)}, ${when(c.created)}, ${c.len || '?'} s, ${esc(c.reason)}</div>
     <span class="tag ${c.review === 'ok' ? 'ok' : ''}">${c.review === 'ok' ? 'zatwierdzony' : 'do przejrzenia'}</span>
     ${c.score ? `<div class="row" style="margin:14px 0 6px"><b class="num ${cls(sc.total)}" style="font-size:34px">${sc.total}</b><span class="sub">ocena na 100</span></div>` : ''}
@@ -426,7 +425,7 @@ function drawSide() {
       ${c.src ? `<button class="b" onclick="${shut}go('editor','${c.id}')">Edytuj</button>` : ''}
       <a class="b" style="text-decoration:none" href="${src(c)}" download="${esc(c.file)}">Pobierz</a>
       <button class="b" onclick="copyDesc('${c.id}')">Kopiuj opis</button>
-      <button class="b bad" onclick="if(confirm('Usunąć ten klip?')){${shut}post('/api/clips/delete',{id:'${c.id}'})}">Usuń</button></div>`;
+      <button class="b bad" onclick="if(confirm('Usunąć ten klip?')){${shut}post('/api/clips/delete',{id:'${c.id}'})}">Usuń</button></div>`);
 }
 function vClips() {
   let list = S.clips.filter(c => inCamp(c) && (!filt.ch || c.channel === filt.ch) && (!filt.rev || (filt.rev === 'ok' ? c.review === 'ok' : c.review !== 'ok')));
@@ -634,14 +633,14 @@ function applyDeps() {
   const dirty = JSON.stringify(cur) !== snap, b = $('savebtn');
   b.disabled = !dirty; b.textContent = dirty ? 'Zapisz zmiany' : 'Wszystko zapisane';
   const st = S.ai_status, mode = cur.ai_mode, name = S.settings.ai_mode === 'cli' ? 'Claude Code' : 'klucz API';
-  $('aibox').innerHTML = st.ok && !aiEdit
+  setHtml($('aibox'), st.ok && !aiEdit
     ? `<p style="color:var(--mint)">AI działa (${name}). Ostatnio sprawdzone ${when(st.at)}.</p><div class="row wrap" style="margin-top:10px">
         <button class="b" ${aiTesting ? 'disabled' : ''} onclick="aiTest()">${aiTesting ? 'Sprawdzam…' : 'Sprawdź ponownie'}</button><button class="link" onclick="aiEdit=true;applyDeps()">Zmień sposób połączenia</button></div>`
     : `${st.checking ? '<p style="color:var(--amber)">Czekam, aż dokończysz logowanie w oknie Claude Code. Potwierdzę sam, gdy zadziała.</p>'
         : st.ok === false ? `<p style="color:var(--hot)">AI nie działa: ${esc(st.msg)}</p>` : ''}
       <div class="row wrap" style="margin-top:10px">${mode === 'cli' && !st.checking ? '<button class="b go" onclick="aiLogin()">Zaloguj do Claude Code</button>' : ''}
         <button class="b" ${aiTesting ? 'disabled' : ''} onclick="aiTest()">${aiTesting ? 'Sprawdzam…' : 'Sprawdź połączenie'}</button></div>
-      <p class="sub" style="margin-top:8px">${mode === 'cli' ? 'Logowanie otwiera oficjalne okno Claude Code i stronę Anthropic. Clipper nie widzi hasła.' : 'Wpisz klucz i sprawdź połączenie.'}</p>`;
+      <p class="sub" style="margin-top:8px">${mode === 'cli' ? 'Logowanie otwiera oficjalne okno Claude Code i stronę Anthropic. Clipper nie widzi hasła.' : 'Wpisz klucz i sprawdź połączenie.'}</p>`);
 }
 // gotowe zestawy kolorow: [tekst, wypowiadane slowo, slowa kluczowe]
 const THEMES = {'Klasyk': ['#FFFFFF', '#FFE600', '#FF4D9D'], 'Neon': ['#FFFFFF', '#58E6FF', '#FF4D9D'], 'Limonka': ['#FFFFFF', '#B6FF3C', '#58E6FF'],
@@ -759,17 +758,31 @@ function vInsights() {
 
 const RENDER = {home: vHome, channels: vChannels, monitor: vMonitor, clips: vClips, rating: vRating, editor: vEditor, publish: vPublish, campaigns: vCampaigns, insights: vInsights, stats: vStats, settings: vSettings};
 const LIVE = {home: 1, channels: 1, monitor: 1, stats: 1, insights: 1};       // widoki odswiezane co 2 s; pozostale tylko przy zmianie klipow
+// Podmienia w drzewie tylko to, co sie faktycznie zmienilo - bez migania i gubienia najechania kursorem.
+const norm = h => h.replace(/ open=""/g, '');
+const hasText = el => [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
+function sync(a, b, depth) {
+  const ac = [...a.children], bc = [...b.children];
+  if (ac.length !== bc.length || hasText(a) || hasText(b)) { a.innerHTML = b.innerHTML; return; }
+  ac.forEach((x, i) => { const y = bc[i];
+    if (norm(x.outerHTML) === norm(y.outerHTML)) return;
+    if (depth < 6 && x.children.length && y.children.length && !['VIDEO', 'SELECT', 'TEXTAREA', 'svg'].includes(x.tagName)
+        && norm(x.cloneNode(false).outerHTML) === norm(y.cloneNode(false).outerHTML)) sync(x, y, depth + 1);
+    else x.replaceWith(y); });
+}
+function setHtml(el, h) { if (el && el._h !== h) { el._h = h; el.innerHTML = h; } }
 function draw(force) {
   if (!S) return;
   const s2 = S.clips.map(c => c.id + c.status + (c.rev || 0) + (c.title || '') + (c.ai ? 1 : 0) + (c.review || '')).join();
   if (!force && !LIVE[view] && (s2 === sig || view === 'settings' || view === 'editor' || view === 'publish' || view === 'campaigns')) return;
-  if (!force && view === 'channels' && document.activeElement && document.activeElement.name === 'q') return;
   sig = s2;
   const log = $('log'), top = log ? log.scrollTop : null;
   const bar = ['channels', 'clips', 'publish', 'rating', 'stats'].includes(view) ? campBar() : '';
-  if (view === 'home' && !force && document.querySelector('#view .todo:hover')) return;   // nie przerysowuj pod kursorem
-  $('view').innerHTML = bar + (S.paused ? `<div class="card warn row" style="border-color:var(--violet);color:var(--text)"><span class="grow">Clipper jest wstrzymany. Kanały nie są nagrywane i klipy nie powstają.</span>
+  const html = bar + (S.paused ? `<div class="card warn row" style="border-color:var(--violet);color:var(--text)"><span class="grow">Clipper jest wstrzymany. Kanały nie są nagrywane i klipy nie powstają.</span>
     <button class="b go" onclick="post('/api/pause',{paused:false})">Start</button></div>` : '') + RENDER[view]();
+  const v = $('view');
+  if (v.dataset.v !== view) { v.innerHTML = html; v.dataset.v = view; }
+  else { const t = document.createElement('div'); t.innerHTML = html; sync(v, t, 0); }
   if (view === 'settings') { styleKey = ''; snap = JSON.stringify(collect()); applyDeps(); }
   if ($('log')) $('log').scrollTop = top == null ? 1e6 : top;
   if (view === 'editor') trim();
