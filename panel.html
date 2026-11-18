@@ -485,6 +485,7 @@ function vEditor() {
   const list = pick(true), c = clip(sel);
   if (!c) return '<h1>Edytor</h1><p class="lead">Tu przytniesz klip, poprawisz napisy i opis. Najpierw musi powstać klip z zachowanym źródłem.</p>';
   const w = c.words || [];
+  if (!camEdit || camEdit.id !== c.id) camEdit = {id: c.id, mode: c.cam_mode || 'auto', box: c.cam_manual || null};
   return `<h1>Edytor</h1><p class="lead">Przesuń początek i koniec, popraw słowa w napisach, a potem wyrenderuj klip ponownie.</p>
   <div class="split">${clipList(list, 'editor')}<div class="card">
     <div class="row wrap" style="gap:18px;align-items:flex-start"><video src="${src(c)}#t=0.5" controls preload="metadata" style="width:190px;aspect-ratio:9/16;background:#000"></video>
@@ -496,11 +497,28 @@ function vEditor() {
       <p class="sub" style="margin:6px 0 12px">Źródło ma ${c.raw_dur} s. Długość klipu: <b class="num" id="l_len"></b> s.</p>
       <div class="row wrap"><button class="b" id="e_save" disabled onclick="saveEdit(false)">Zapisz opis</button><button class="b go" onclick="saveEdit(true)">Renderuj ponownie</button></div>
       <div class="row wrap" style="margin-top:10px"><span class="sub">Inne formaty:</span>${[['16x9', 'Poziomy 16:9'], ['1x1', 'Kwadrat 1:1'], ['srt', 'Napisy SRT']].map(([f, t]) => `<button class="b" onclick="exportClip('${f}',this)">${t}</button>`).join('')}</div></div></div>
+    <h2>Kamerka</h2>${c.src ? `<p class="sub" style="margin-bottom:8px">Przeciągnij myszą po obrazie od rogu do rogu, żeby zaznaczyć okno kamerki. Zmiana zadziała po „Renderuj ponownie”. Teraz: ${esc(c.layout || 'układ domyślny')}.</p>
+      <div id="camsel" onpointerdown="camDown(event)" style="position:relative;max-width:640px;cursor:crosshair;touch-action:none;user-select:none"><img src="/api/frame?id=${c.id}&r=${c.rev || 0}" alt="Klatka ze źródła klipu" draggable="false" style="width:100%;display:block;border-radius:12px"><div id="cambox" style="position:absolute;display:none;border:2px solid var(--cyan);background:rgba(255,98,7,.18);pointer-events:none"></div></div>
+      <div class="row wrap" style="margin-top:10px"><button class="b" data-cam="auto" onclick="camEdit.mode='auto';camDraw()">Wykryj automatycznie</button><button class="b" data-cam="manual" onclick="if(camEdit.box){camEdit.mode='manual';camDraw()}else toast('Najpierw zaznacz kamerkę na obrazie')">Moje zaznaczenie</button><button class="b" data-cam="off" onclick="camEdit.mode='off';camDraw()">Bez kamerki</button>
+        <label class="row sub" style="gap:6px;cursor:pointer"><input type="checkbox" id="e_camch">Zapamiętaj dla całego kanału</label></div>` : '<p class="sub">Ten klip nie ma zachowanego źródła, więc nie da się zmienić kamerki.</p>'}
     <h2>Napisy</h2>${w.length ? `<p class="sub" style="margin-bottom:8px">Popraw słowo albo wyczyść pole, żeby zniknęło z napisów. Przygaszone słowa są poza przyciętym fragmentem.</p>
       <label class="row sub" style="gap:6px;margin-bottom:10px;cursor:pointer"><input type="checkbox" id="e_cutmode" style="accent-color:var(--hot)">Tryb wycinania: kliknij słowa, które mają zniknąć z filmu razem z obrazem i dźwiękiem</label>
       <div class="words" id="e_words" onclick="if($('e_cutmode').checked&&event.target.tagName==='INPUT'){event.target.classList.toggle('cutw');event.target.blur()}">${w.map((x, i) => `<input data-s="${x[0]}" class="${(c.cut || [])[i] ? 'cutw' : ''}" value="${esc(x[2])}" size="${Math.max(2, x[2].length)}">`).join('')}</div>`
       : '<p class="sub">Ten klip nie ma transkrypcji.</p>'}</div></div>`;
 }
+let camEdit = null;      // wybor kamerki w Edytorze: {id, mode: auto | manual | off, box: [x, y, w, h] w % kadru}
+function camDraw() { const b = $('cambox'); if (!b || !camEdit) return;
+  const on = camEdit.mode === 'manual' && camEdit.box; b.style.display = on ? 'block' : 'none';
+  if (on) { const [x, y, w, h] = camEdit.box; Object.assign(b.style, {left: x + '%', top: y + '%', width: w + '%', height: h + '%'}); }
+  document.querySelectorAll('[data-cam]').forEach(e => e.classList.toggle('go', e.dataset.cam === camEdit.mode)); }
+function camDown(e) { const r = e.currentTarget.getBoundingClientRect(); e.preventDefault();
+  const at = ev => [Math.max(0, Math.min(100, (ev.clientX - r.left) / r.width * 100)), Math.max(0, Math.min(100, (ev.clientY - r.top) / r.height * 100))];
+  const [x0, y0] = at(e);
+  const move = ev => { const [x1, y1] = at(ev); camEdit.mode = 'manual';
+    camEdit.box = [Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)].map(v => Math.round(v * 10) / 10); camDraw(); };
+  const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up);
+    if (camEdit.mode === 'manual' && camEdit.box && (camEdit.box[2] < 4 || camEdit.box[3] < 4)) { camEdit.box = null; camEdit.mode = 'auto'; camDraw(); toast('Zaznacz większy prostokąt'); } };
+  addEventListener('pointermove', move); addEventListener('pointerup', up); }
 async function exportClip(format, btn) {
   const old = btn.textContent; btn.disabled = true; btn.textContent = 'Eksportuję…';
   const r = await post('/api/clips/export', {id: sel, format}, true); btn.disabled = false; btn.textContent = old;
@@ -561,6 +579,7 @@ function trim(el) {
 }
 async function saveEdit(render) {
   const body = {id: sel, title: $('e_title').value, tags: $('e_tags').value};
+  if (render && camEdit && camEdit.id === sel) { body.cam_mode = camEdit.mode; body.cam = camEdit.box; body.cam_channel = !!($('e_camch') && $('e_camch').checked); }
   if (render) { body.rerender = true; body.t_in = +$('e_in').value; body.t_out = +$('e_out').value;
     const w = document.querySelectorAll('#e_words input'); if (w.length) { body.words = [...w].map(i => i.value); body.cut = [...w].map(i => i.classList.contains('cutw')); } }
   const r = await post('/api/clips/update', body);
@@ -802,7 +821,7 @@ function draw(force) {
   else { const t = document.createElement('div'); t.innerHTML = html; sync(v, t, 0); }
   if (view === 'settings') { styleKey = ''; snap = JSON.stringify(collect()); applyDeps(); }
   if ($('log')) $('log').scrollTop = top == null ? 1e6 : top;
-  if (view === 'editor') trim();
+  if (view === 'editor') { trim(); camDraw(); }
 }
 async function refresh(force) {
   try { S = await (await fetch('/api/state')).json(); } catch { return; }

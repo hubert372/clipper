@@ -2117,7 +2117,13 @@ class App:
             fc, v, a = self.source_filters(tl, has_audio)
             fh = int(1080 * sh / sw) // 2 * 2
             zoom_off = False
-            face = find_face(CLIPS / raw, tl["t_in"], tl["t_in"] + tl["dur0"]) if s["smart_layout"] else None
+            face = None
+            if clip.get("cam_mode") == "manual" and clip.get("cam_manual"):      # kamerka zaznaczona przez uzytkownika
+                o["facecam"], o["cam"], clip["layout"] = True, list(clip["cam_manual"]), "kamerka zaznaczona ręcznie"
+            elif clip.get("cam_mode") == "off":
+                o["facecam"], clip["layout"] = False, "bez kamerki (wybór ręczny)"
+            elif s["smart_layout"]:
+                face = find_face(CLIPS / raw, tl["t_in"], tl["t_in"] + tl["dur0"])
             if face is not None:
                 if not face:                                   # w klipie nie ma twarzy - nie wycinaj kamerki na slepo
                     if o["facecam"]:
@@ -2649,6 +2655,22 @@ class App:
                 if isinstance(w, list) and len(w) == len(c.get("words") or []):
                     for old, new in zip(c["words"], w):
                         old[2] = str(new).strip()[:60]
+                if body.get("cam_mode") in ("auto", "manual", "off"):
+                    mode, ch = body["cam_mode"], self.channels.get(c["channel"])
+                    if mode == "manual":
+                        try:
+                            x, y, w, h = [max(0.0, min(100.0, float(n))) for n in body.get("cam")][:4]
+                            w, h = min(w, 100 - x), min(h, 100 - y)
+                            if w < 4 or h < 4:
+                                raise ValueError
+                        except (TypeError, ValueError):
+                            return {"error": "Zaznacz kamerkę na obrazie"}
+                        c["cam_manual"] = [round(v, 1) for v in (x, y, w, h)]
+                        if body.get("cam_channel") and ch:
+                            ch.opts["cam"], ch.opts["facecam"] = list(c["cam_manual"]), True
+                    elif mode == "off" and body.get("cam_channel") and ch:
+                        ch.opts["facecam"] = False
+                    c["cam_mode"] = mode
                 c["status"] = "processing"
                 self.jobs.put(("render", c, None))
         elif path == "/api/clips/export":
@@ -2823,6 +2845,17 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/caption-preview":
             f = self.app.caption_preview(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query))
             return self._file(f) if f else self._send(404, {"error": "brak podglądu"})
+        if path == "/api/frame":
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            c = next((c for c in self.app.clips if c["id"] == q.get("id", [""])[0]), None)
+            raw = CLIPS / "src" / ((c["id"] if c else "-") + ".ts")
+            if not c or not raw.exists() or not which("ffmpeg"):
+                return self._send(404, {"error": "brak źródła klipu"})
+            t = (float(c.get("t_in", 0)) + float(c.get("t_out", 0))) / 2
+            r = subprocess.run([which("ffmpeg"), "-v", "error", "-ss", "%.2f" % t, "-i", str(raw), "-frames:v", "1",
+                                "-vf", "scale=960:-2", "-f", "image2pipe", "-c:v", "mjpeg", "-"],
+                               capture_output=True, timeout=60, creationflags=NO_WINDOW)
+            return self._send(200, r.stdout, "image/jpeg") if r.stdout else self._send(404, {"error": "brak klatki"})
         if path == "/api/qr":
             cid = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("id", [""])[0]
             ok = any(c["id"] == cid and c.get("review") == "ok" for c in self.app.clips)
