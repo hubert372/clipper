@@ -126,14 +126,15 @@ video:fullscreen{object-fit:contain!important;aspect-ratio:auto!important;backgr
 </div>
 <dialog id="chdlg"></dialog>
 <dialog id="clipdlg"></dialog>
+<dialog id="campdlg"></dialog>
 <div class="toast" id="toast"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let saved = ''; try { saved = localStorage.getItem('clipper_view') || ''; } catch {}
-let S = null, view = ['monitor','clips','rating','editor','publish','stats','settings'].find(v => v === (location.hash.slice(1) || saved)) || 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'new', rev: ''}, aiBusy = false, addAI = false;
-const VIEWS = [['channels', 'Kanały'], ['monitor', 'Monitor'], ['clips', 'Klipy'], ['rating', 'Ocena'], ['editor', 'Edytor'], ['publish', 'Publikacja'], ['stats', 'Statystyki'], ['settings', 'Ustawienia']];
+let S = null, view = ['monitor','clips','rating','editor','publish','campaigns','insights','stats','settings'].find(v => v === (location.hash.slice(1) || saved)) || 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'best', rev: ''}, aiBusy = false, addAI = false;
+const VIEWS = [['channels', 'Kanały'], ['monitor', 'Monitor'], ['clips', 'Klipy'], ['rating', 'Ocena'], ['editor', 'Edytor'], ['publish', 'Publikacja'], ['campaigns', 'Kampanie'], ['insights', 'Wnioski'], ['stats', 'Statystyki'], ['settings', 'Ustawienia']];
 
 async function post(path, body, quiet) {
   let j = {};
@@ -270,7 +271,7 @@ function clipCard(c) {
   const sc = total(c);
   const body = c.status === 'ready' ? `<div class="thumb" tabindex="0" role="button" aria-label="Otwórz klip" onclick="openClip('${c.id}')" onkeydown="if(event.key==='Enter')openClip('${c.id}')"><video src="${src(c)}#t=0.5" preload="metadata" muted playsinline></video><span class="play">▶</span></div>`
     : `<div class="ph">${c.status === 'error' ? 'Nie udało się: ' + esc(c.error || '') : c.status === 'processing' ? 'Renderuję…' : 'Czekam na dalszy ciąg…'}</div>`;
-  return `<div class="card clip">${body}${sc != null && c.status === 'ready' ? `<span class="badge ${cls(sc)}">${sc}</span>` : ''}<div class="meta">
+  return `<div class="card clip">${body}${sc != null && c.status === 'ready' ? `<span class="badge ${cls(c.pot ?? sc)}" title="Potencjał: ocena skorygowana o to, co dotąd dawało wyświetlenia">${c.pot ?? sc}</span>` : ''}<div class="meta">
     <div class="t" title="${esc(c.title)}">${esc(c.title || c.channel)}</div>
     ${c.status === 'ready' ? `<span class="tag ${c.review === 'ok' ? 'ok' : ''}">${c.review === 'ok' ? 'zatwierdzony' : 'do przejrzenia'}</span>` : ''}<div class="sub">${esc(c.channel)}, ${when(c.created)}, ${esc(c.reason)}</div>
     ${c.status === 'ready' && c.review !== 'ok' ? `<div class="row" style="margin-top:8px"><button class="b go grow" onclick="post('/api/clips/review',{id:'${c.id}',ok:true})">Zatwierdź</button>
@@ -314,11 +315,12 @@ function drawSide() {
 function vClips() {
   let list = S.clips.filter(c => (!filt.ch || c.channel === filt.ch) && (!filt.rev || (filt.rev === 'ok' ? c.review === 'ok' : c.review !== 'ok')));
   if (filt.sort === 'score') list = [...list].sort((a, b) => (total(b) ?? -1) - (total(a) ?? -1));
+  if (filt.sort === 'best') list = [...list].sort((a, b) => (b.review !== 'ok') - (a.review !== 'ok') || (b.pot ?? -1) - (a.pot ?? -1));
   const chans = [...new Set(S.clips.map(c => c.channel))];
   return `<div class="row wrap"><h1 class="grow">Klipy</h1>
     <select onchange="filt.ch=this.value;sig='';draw(true)"><option value="">Wszystkie kanały</option>${chans.map(n => `<option ${n === filt.ch ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
     <select onchange="filt.rev=this.value;sig='';draw(true)"><option value="">Wszystkie</option><option value="new" ${filt.rev === 'new' ? 'selected' : ''}>Do przejrzenia</option><option value="ok" ${filt.rev === 'ok' ? 'selected' : ''}>Zatwierdzone</option></select>
-    <select onchange="filt.sort=this.value;sig='';draw(true)"><option value="new">Najnowsze</option><option value="score" ${filt.sort === 'score' ? 'selected' : ''}>Najwyżej ocenione</option></select>
+    <select onchange="filt.sort=this.value;sig='';draw(true)"><option value="best" ${filt.sort === 'best' ? 'selected' : ''}>Najpierw najlepsze</option><option value="new" ${filt.sort === 'new' ? 'selected' : ''}>Najnowsze</option><option value="score" ${filt.sort === 'score' ? 'selected' : ''}>Najwyżej ocenione</option></select>
     ${ready().filter(c => c.review === 'ok' && c.kind !== 'montage').length > 1 ? `<button class="b" id="mbtn" onclick="this.disabled=true;this.textContent='Składam montaż…';post('/api/montage',{}).then(r=>{if(!r.error)toast('Montaż gotowy')})">Montaż z zatwierdzonych</button>` : ''}
     ${ready().some(c => c.review === 'ok') ? `<button class="b" onclick="zip()">Pobierz zatwierdzone (ZIP)</button>` : ''}
     <button class="b" onclick="post('/api/open-folder',{})">Otwórz folder</button></div>
@@ -397,7 +399,7 @@ function pub(id, platform, obj) { const c = clip(id); c.pub = c.pub || {}; c.pub
 function copyText(t) { (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).catch(() => { const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); }); toast('Skopiowano'); }
 // kontrola wymagan kampanii dla klipu
 function campChecks(c) {
-  const n = c.camp.name.toLowerCase(), tags = c.camp.tags.toLowerCase().split(/\s+/).filter(Boolean), posts = PLAT.map(([k]) => ((c.posts || {})[k] || '').toLowerCase());
+  const n = (c.camp.name || '').toLowerCase(), tags = (c.camp.tags || '').toLowerCase().split(/\s+/).filter(Boolean), posts = PLAT.map(([k]) => ((c.posts || {})[k] || '').toLowerCase());
   const o = c.opts || {}, rows = [
     [(c.title || '').toLowerCase().includes(n) && (o.title_bar || posts.every(p => p.includes(n))), `Nazwa ${c.camp.name} w tekście na klipie lub w opisie`],
     [tags.every(t => posts.every(p => p.includes(t))), `Hashtagi ${c.camp.tags} w każdym opisie`],
@@ -409,11 +411,12 @@ function campChecks(c) {
 function vPublish() {
   const list = ready().filter(c => c.review === 'ok');
   const left = c => PLAT.filter(([k]) => !((c.pub || {})[k] || {}).done).length;
-  list.sort((a, b) => (left(b) > 0) - (left(a) > 0) || b.created - a.created);
+  list.sort((a, b) => (left(b) > 0) - (left(a) > 0) || (b.pot ?? 0) - (a.pot ?? 0) || b.created - a.created);
   return `<h1>Publikacja</h1><p class="lead">Zatwierdzone klipy z gotowym opisem na każdą platformę. Skopiuj opis, wrzuć klip, odhacz i po czasie wpisz wyświetlenia.</p>
   ${list.map(c => `<div class="card" style="margin-bottom:14px"><div class="row wrap"><button class="link name" onclick="openClip('${c.id}')">${esc(c.title || c.channel)}</button>
       <span class="sub grow">${esc(c.channel)}, ${when(c.created)}</span><a class="b" style="text-decoration:none" href="${src(c)}" download="${esc(c.file)}">Pobierz klip</a>
       ${S.deps.ai ? `<button class="b" onclick="this.disabled=true;this.textContent='Piszę…';post('/api/clips/posts-ai',{id:'${c.id}'}).then(r=>{if(!r.error)toast('Opisy gotowe')})">Napisz opisy przez AI</button>` : ''}</div>
+    ${c.risk ? `<div class="sub" style="color:var(--hot);margin-top:8px">Uwaga AI: ${esc(c.risk)}</div>` : ''}
     ${c.camp ? campChecks(c) : ''}
     ${PLAT.map(([k, t]) => { const p = (c.pub || {})[k] || {}, txt = (c.posts || {})[k] || '';
       return `<div class="pubrow"><b>${t}</b><textarea onchange="pub('${c.id}','${k}',{text:this.value})">${esc(txt)}</textarea>
@@ -487,13 +490,15 @@ const FIELDS = [
     ['cap_color', 'Kolor tekstu', 'color'], ['cap_highlight', 'Kolor wypowiadanego słowa', 'color'],
     ['cap_pos', 'Pozycja', 'sel', [['bottom', 'Na dole'], ['middle', 'Na środku'], ['top', 'Na górze']]], ['cap_words', 'Słów na ekranie', 'num', 1], ['cap_upper', 'Wielkie litery', 'bool']]],
   ['Opis i powiadomienia', [['hashtags', 'Stałe hashtagi', 'text'], ['notify_sound', 'Dźwięk, gdy klip jest gotowy', 'bool'], ['discord_webhook', 'Webhook Discorda (opcjonalnie)', 'text']]],
+  ['Uczenie się i telefon', [['learn_apply', 'Sam przestawiaj ustawienia na to, co daje wyświetlenia', 'bool'], ['learn_explore', 'Rób część klipów w wariancie testowym', 'bool'],
+    ['notify_min_score', 'Powiadomienia tylko od oceny (0 = wszystkie)', 'num', 1], ['phone_access', 'Klipy na telefon w domowej sieci', 'bool']]],
   ['Szablon i obróbka (włączasz per kanał w Opcjach)', [['logo_path', 'Ścieżka do pliku logo (PNG)', 'text'],
     ['logo_pos', 'Pozycja logo', 'sel', [['tr', 'Prawy górny róg'], ['tl', 'Lewy górny róg'], ['br', 'Prawy dolny róg'], ['bl', 'Lewy dolny róg']]],
     ['censor_words', 'Cenzurowane słowa (początki, po przecinku)', 'text'], ['highlight_words', 'Wyróżniane słowa (po przecinku)', 'text'],
     ['kw_color', 'Kolor wyróżnionych słów', 'color'], ['silence_gap', 'Wycinaj ciszę dłuższą niż (s)', 'num', 0.5], ['game_zoom', 'Przybliżenie gry w układzie z kamerką (1 = cały obraz)', 'num', 0.05],
     ['audio_db', 'Skok głośności: o ile dB ponad zwykły poziom', 'num', 1], ['auto_delete_below', 'Kasuj klipy z oceną poniżej (0 = nie kasuj)', 'num', 1]]],
   ['AI (ocena klipów i dobór ustawień kanału)', [['ai_mode', 'Skąd AI', 'sel', [['api', 'Klucz API Anthropic'], ['cli', 'Claude Code (logowanie kontem Claude)']]],
-    ['auto_ai_tune', 'AI samo dobiera opcje każdego kanału raz na dobę', 'bool'],
+    ['auto_ai_tune', 'AI samo dobiera opcje każdego kanału raz na dobę', 'bool'], ['ai_cut_all', 'AI wybiera fragment i tytuł każdego klipu', 'bool'],
     ['ai_key', 'Klucz API (tylko dla trybu z kluczem)', 'pass'], ['ai_model', 'Model (tylko dla trybu z kluczem)', 'text']]],
 ];
 // pola widoczne tylko wtedy, gdy ma to sens (np. styl napisow tylko przy wlaczonych napisach)
@@ -550,7 +555,8 @@ function vSettings() {
       : type === 'num' ? `<input type="number" min="0" step="${opt}" data-k="${k}" value="${v}">`
       : type === 'color' ? `<input type="color" data-k="${k}" value="${esc(v)}">`
       : `<input type="${type === 'pass' ? 'password' : 'text'}" data-k="${k}" value="${esc(v)}" autocomplete="off">`;
-    return `<div class="field" ${DEP[k] ? `data-dep="${DEP[k]}"` : ''}><span>${label}</span>${ctl}</div>`; }).join('')}${title.startsWith('AI') ? '<div id="aibox"></div>' : ''}</div>`).join('')}</div></div>`;
+    return `<div class="field" ${DEP[k] ? `data-dep="${DEP[k]}"` : ''}><span>${label}</span>${ctl}</div>`; }).join('')}${title.startsWith('AI') ? '<div id="aibox"></div>' : ''}${title.startsWith('Uczenie') && S.phone.url ? `<div style="margin-top:12px"><p class="sub">Zeskanuj telefonem w tej samej sieci Wi-Fi. Adres zawiera tajny kod; pokazuje tylko zatwierdzone klipy do pobrania.</p>
+      <div class="row wrap" style="margin-top:8px;gap:16px">${S.phone.qr ? `<div style="background:#fff;padding:6px;width:170px">${S.phone.qr.replace('<svg ', '<svg style="width:100%;height:auto;display:block" ')}</div>` : ''}<code style="word-break:break-all">${esc(S.phone.url)}</code></div></div>` : ''}</div>`).join('')}</div></div>`;
 }
 async function saveSettings(quiet) {
   const r = await post('/api/settings', collect()); if (!r.error) { aiEdit = false; if (!quiet) toast('Zapisano ustawienia'); draw(true); } return r;
@@ -563,12 +569,81 @@ async function aiTest() {
 }
 
 /* ---------- petla ---------- */
-const RENDER = {channels: vChannels, monitor: vMonitor, clips: vClips, rating: vRating, editor: vEditor, publish: vPublish, stats: vStats, settings: vSettings};
-const LIVE = {channels: 1, monitor: 1, stats: 1};       // widoki odswiezane co 2 s; pozostale tylko przy zmianie klipow
+/* ---------- kampanie ---------- */
+let found = null, campEdit = null;
+const usd = n => '$' + Math.round(n).toLocaleString('pl-PL');
+function vCampaigns() {
+  const mine = S.campaigns, st = S.camp_stats || {};
+  return `<h1>Kampanie</h1><p class="lead">Kampania przypisana do kanału pilnuje wymagań w każdym klipie i liczy szacowany zarobek z wpisanych wyświetleń.</p>
+  <div class="row wrap" style="margin-bottom:14px"><input id="c_url" class="grow" placeholder="Wklej link do kampanii z contentrewards.com" autocomplete="off">
+    <button class="b go" onclick="importCamp($('c_url').value, this)">Wczytaj kampanię</button><button class="b" onclick="editCamp({title:'',fee:10,lang:'en',channels:[],active:true})">Dodaj ręcznie</button></div>
+  <div class="grid big">${mine.map(c => { const x = st[c.id] || {clips: 0, views: 0, posted: 0}; return `<div class="card">
+    <div class="row"><div class="name grow">${esc(c.title)}</div><span class="tag ${c.active ? 'ok' : ''}">${c.active ? 'aktywna' : 'wyłączona'}</span></div>
+    <div class="sub" style="margin:4px 0 10px">${c.rate ? '$' + c.rate + ' za 1000 wyświetleń' : c.pool ? 'pula ' + usd(c.pool) : 'bez stawki'}${c.min_views ? ', minimum ' + c.min_views.toLocaleString('pl-PL') + ' wyświetleń' : ''}</div>
+    <div class="row wrap" style="gap:22px;margin-bottom:10px"><div><b class="num" style="font-size:24px">${x.clips}</b><div class="sub">klipów (${x.posted} wrzuconych)</div></div>
+      <div><b class="num" style="font-size:24px">${x.views.toLocaleString('pl-PL')}</b><div class="sub">wyświetleń</div></div>
+      <div><b class="num" style="font-size:24px;color:var(--mint)">${x.est != null ? '$' + x.est.toFixed(2) : '–'}</b><div class="sub">${x.est != null ? 'szacowany zarobek po prowizji' : 'zarobek zależy od udziału w puli'}</div></div></div>
+    ${c.min_views ? `<div class="bar" style="margin-bottom:10px"><b style="width:${Math.min(100, x.views / c.min_views * 100)}%"></b></div>` : ''}
+    <div class="sub">Kanały: ${c.channels.length ? esc(c.channels.join(', ')) : 'żaden, przypisz kanał w edycji'}${c.name ? '<br>Wymagana nazwa: ' + esc(c.name) : ''}${c.tags ? '<br>Hashtagi: ' + esc(c.tags) : ''}</div>
+    ${c.rules ? `<details style="margin-top:8px"><summary class="link">Wymagania i zakazy</summary><div class="sub" style="white-space:pre-wrap;margin-top:6px">${esc(c.rules)}</div></details>` : ''}
+    <div class="row wrap" style="margin-top:12px"><button class="b" onclick="editCamp(S.campaigns.find(x=>x.id==='${c.id}'))">Edytuj</button>
+      ${c.url ? `<a class="b" style="text-decoration:none" href="${esc(c.url)}" target="_blank" rel="noopener">Otwórz kampanię</a>` : ''}
+      <button class="link bad" onclick="if(confirm('Usunąć kampanię?'))post('/api/campaigns/delete',{id:'${c.id}'})">Usuń</button></div></div>`; }).join('') ||
+    '<div class="empty">Nie masz jeszcze kampanii. Wczytaj ją z linku albo wybierz z proponowanych poniżej.</div>'}</div>
+  <div class="row" style="margin-top:26px"><h2 class="grow" style="margin:0">Proponowane kampanie</h2><button class="b" id="fbtn" onclick="discover(true)">${found ? 'Odśwież listę' : 'Pobierz listę z Content Rewards'}</button></div>
+  <p class="sub" style="margin:6px 0 12px">Kolejność: wyższa stawka, więcej wolnego budżetu, mniej klipujących i świeższe kampanie wyżej. Regulamin każdej kampanii przeczytaj przed startem.</p>
+  ${found ? (found.length ? `<input placeholder="Szukaj w kampaniach" oninput="document.querySelectorAll('.frow').forEach(r=>r.style.display=r.textContent.toLowerCase().includes(this.value.toLowerCase())?'':'none')" style="width:100%;margin-bottom:10px">
+    <div class="card" style="padding:6px 14px">${found.map(c => `<div class="frow row wrap" style="padding:10px 0;border-top:1px solid rgba(127,141,168,.14)"><div class="grow" style="min-width:240px"><b>${esc(c.title)}</b> <span class="sub">${esc(c.org)}</span><br><span class="sub">${esc(c.why)}</span></div>
+      <a class="link" href="${esc(c.url)}" target="_blank" rel="noopener">Otwórz</a><button class="b" onclick="importCamp('${esc(c.url)}', this)">Dodaj do moich</button></div>`).join('')}</div>`
+    : '<p class="sub">Strona nie zwróciła listy kampanii. Otwórz <a class="link" href="https://contentrewards.com/c/discover/clipping" target="_blank" rel="noopener">przegląd kampanii</a> w przeglądarce i wklej link wybranej kampanii powyżej.</p>') : ''}`;
+}
+async function discover(force) { const b = $('fbtn'); if (b) { b.disabled = true; b.textContent = 'Pobieram…'; }
+  const r = await post('/api/campaigns/discover', {force}, true); if (r.error) toast(r.error); else found = r.found; sig = ''; draw(true); }
+async function importCamp(url, btn) { if (!url.trim()) return toast('Wklej link do kampanii');
+  const old = btn.textContent; btn.disabled = true; btn.textContent = S.deps.ai ? 'AI czyta regulamin…' : 'Wczytuję…';
+  const r = await post('/api/campaigns/import', {url}, true); btn.disabled = false; btn.textContent = old;
+  if (r.error) return toast(r.error); editCamp(r.campaign); }
+function editCamp(c) { campEdit = c; const d = $('campdlg');
+  const f = (k, t, ph, type) => `<div class="field"><span>${t}</span><input type="${type || 'text'}" data-c="${k}" value="${esc(c[k] ?? '')}" placeholder="${ph || ''}" style="width:${type ? 110 : 240}px"></div>`;
+  d.innerHTML = `<div class="row"><div class="name grow">${c.id ? 'Edycja kampanii' : 'Nowa kampania'}</div><button class="link" onclick="campdlg.close()">Zamknij</button></div>
+    ${f('title', 'Nazwa kampanii')}${f('url', 'Link do kampanii', 'https://contentrewards.com/…')}${f('name', 'Nazwa wymagana w tekście', 'np. LACY')}${f('tags', 'Wymagane hashtagi', '#LACY')}
+    ${f('lang', 'Język napisów i opisów', 'en')}${f('rate', 'Stawka za 1000 wyświetleń ($)', '', 'number')}${f('pool', 'Pula ($), jeśli bez stawki', '', 'number')}
+    ${f('min_views', 'Minimum wyświetleń', '', 'number')}${f('fee', 'Prowizja platformy (%)', '', 'number')}
+    <div class="field"><span>Kampania aktywna</span><button type="button" class="sw ${c.active !== false ? 'on' : ''}" data-c="active" onclick="this.classList.toggle('on')"></button></div>
+    <h2>Kanały w tej kampanii</h2><div class="row wrap">${S.channels.map(ch => `<label class="row sub" style="gap:6px"><input type="checkbox" data-ch="${ch.name}" ${(c.channels || []).includes(ch.name) ? 'checked' : ''}>${esc(ch.name)}</label>`).join('') || '<span class="sub">Najpierw dodaj kanał w zakładce Kanały.</span>'}</div>
+    <h2>Wymagania i zakazy</h2><p class="sub" style="margin-bottom:6px">AI sprawdza każdy klip z tej kampanii pod kątem tych zasad.</p><textarea data-c="rules" style="width:100%;min-height:120px">${esc(c.rules || '')}</textarea>
+    <div class="row" style="margin-top:14px"><span class="grow"></span><button class="b go" onclick="saveCamp()">Zapisz kampanię</button></div>`; d.showModal(); }
+async function saveCamp() { const c = Object.assign({}, campEdit);
+  document.querySelectorAll('#campdlg [data-c]').forEach(e => { c[e.dataset.c] = e.classList.contains('sw') ? e.classList.contains('on') : e.value; });
+  c.channels = [...document.querySelectorAll('#campdlg [data-ch]')].filter(e => e.checked).map(e => e.dataset.ch);
+  const r = await post('/api/campaigns/save', {campaign: c}); if (!r.error) { $('campdlg').close(); toast('Zapisano kampanię'); } }
+
+/* ---------- wnioski z wynikow ---------- */
+function vInsights() {
+  const m = S.insights, need = Math.max(0, 12 - m.clips), groups = {};
+  m.rows.forEach(r => (groups[r.group] = groups[r.group] || []).push(r));
+  const bar = r => `<div class="hbar" style="grid-template-columns:150px 1fr 150px"><span>${esc(r.value)}</span>
+    <div class="bar" style="position:relative;background:none"><b style="position:absolute;top:0;height:8px;${r.lift >= 0 ? 'left:50%' : 'right:50%'};width:${Math.min(50, Math.abs(r.lift) / 2)}%;background:${r.lift >= 0 ? 'var(--mint)' : 'var(--hot)'}"></b><i style="position:absolute;left:50%;top:-3px;height:14px;border-left:1px solid var(--sub)"></i></div>
+    <span class="num" style="color:${r.lift >= 0 ? 'var(--mint)' : 'var(--hot)'}">${r.lift >= 0 ? '+' : ''}${r.lift}% <span class="sub">${r.n} wyn., ${r.conf}</span></span></div>`;
+  return `<h1>Wnioski</h1><p class="lead">Clipper porównuje wpisane wyświetlenia z cechami klipów i sam przestawia ustawienia na to, co działa. Procent pokazuje, o ile dana cecha podnosi lub obniża wyświetlenia względem średniej na tej samej platformie.</p>
+  <div class="tiles"><div class="card tile"><b>${m.clips}</b><span class="sub">klipów z wynikami (${m.obs} pomiarów)</span></div>
+    <div class="card tile"><b>${m.variants}</b><span class="sub">klipów w wariancie testowym</span></div>
+    <div class="card tile"><b>${m.log.length}</b><span class="sub">zmian wprowadzonych automatycznie</span></div></div>
+  ${need ? `<div class="card warn">Za mało danych na pewne wnioski. Wpisz w zakładce Publikacja wyświetlenia jeszcze ${need} klipów; do tego czasu traktuj poniższe liczby jako wstępne.</div>` : ''}
+  ${m.todo.length ? `<div class="card" style="margin-bottom:14px"><b>Brakuje wyników</b><p class="sub" style="margin:4px 0 8px">Te klipy są wrzucone ponad dobę temu i nie mają wpisanych wyświetleń.</p>
+    ${m.todo.map(id => clip(id)).filter(Boolean).map(c => `<button class="link" style="display:block;margin:4px 0" onclick="go('publish')">${esc(c.title || c.channel)}</button>`).join('')}</div>` : ''}
+  <div class="grid big">${Object.entries(groups).map(([g, rows]) => `<div class="card"><h2 style="margin-top:0">${esc(g)}</h2>${rows.sort((a, b) => b.lift - a.lift).map(bar).join('')}</div>`).join('') ||
+    '<div class="empty">Wnioski pojawią się, gdy co najmniej 3 klipy o tej samej cesze będą miały wpisane wyświetlenia.</div>'}</div>
+  <h2>Co Clipper zmienił sam</h2><div class="card log" style="max-height:none">${esc(m.log.map(l => when(l[0]) + '  ' + l[1]).join('\n') || 'Jeszcze nic. Zmiana następuje, gdy różnica jest wyraźna i oparta na co najmniej kilku klipach.')}</div>
+  <p class="sub" style="margin-top:10px">Żeby było co porównywać, mniej więcej co trzeci automatyczny klip powstaje w jednym zmienionym wariancie (inny styl napisów, długość albo efekt). Wyłączysz to w Ustawieniach.</p>`;
+}
+
+const RENDER = {channels: vChannels, monitor: vMonitor, clips: vClips, rating: vRating, editor: vEditor, publish: vPublish, campaigns: vCampaigns, insights: vInsights, stats: vStats, settings: vSettings};
+const LIVE = {channels: 1, monitor: 1, stats: 1, insights: 1};       // widoki odswiezane co 2 s; pozostale tylko przy zmianie klipow
 function draw(force) {
   if (!S) return;
   const s2 = S.clips.map(c => c.id + c.status + (c.rev || 0) + (c.title || '') + (c.ai ? 1 : 0) + (c.review || '')).join();
-  if (!force && !LIVE[view] && (s2 === sig || view === 'settings' || view === 'editor' || view === 'publish')) return;
+  if (!force && !LIVE[view] && (s2 === sig || view === 'settings' || view === 'editor' || view === 'publish' || view === 'campaigns')) return;
   if (!force && view === 'channels' && document.activeElement && document.activeElement.name === 'q') return;
   sig = s2;
   const log = $('log'), top = log ? log.scrollTop : null;

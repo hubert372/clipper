@@ -60,6 +60,20 @@ w `data/clipper.log`. Panel w przeglądarce zamiast okna: `python app.py --brows
 - **Publikacja**: opisy osobno na Shorts, TikToka i Reels, plan, odhaczanie i wyświetlenia;
   wyniki widać w Statystykach.
 
+## Zarabianie na klipach
+
+- **Wnioski**: po wpisaniu wyświetleń w zakładce Publikacja Clipper liczy, o ile długość klipu,
+  styl napisów, efekty, kanał, platforma i pora publikacji podnoszą lub obniżają wyświetlenia,
+  i sam przestawia ustawienia na to, co działa. Około co trzeci automatyczny klip powstaje
+  w jednym zmienionym wariancie, żeby było co porównywać. Każda zmiana jest w dzienniku Wniosków.
+- **Potencjał**: liczba na kafelku klipu to ocena skorygowana o dotychczasowe wyniki; Klipy
+  i Publikacja są domyślnie sortowane od najlepszych.
+- **Kampanie**: wczytujesz kampanię z linku Content Rewards (AI czyta regulamin), przypisujesz
+  kanały, a Clipper pilnuje wymagań, sprawdza klipy pod kątem zasad i liczy szacowany zarobek.
+  „Proponowane kampanie” pobiera publiczną listę z Content Rewards.
+- **Klipy na telefon**: po włączeniu w Ustawieniach skanujesz kod QR i pobierasz zatwierdzone
+  klipy z opisami na telefonie w tej samej sieci Wi-Fi (osobny port, tylko odczyt, tajny adres).
+
 ## Start, pauza i opcje kanału
 
 - Przycisk **Pauza / Start** w lewym panelu wstrzymuje i wznawia nagrywanie wszystkich
