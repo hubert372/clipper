@@ -411,7 +411,8 @@ function drawSide() {
   const c = clip(viewId); if (!c) return $('clipdlg').close();
   const sc = c.score || {total: 0, parts: [], tips: []}, shut = "$('clipdlg').close();";
   setHtml(box, `<div class="row"><div class="name grow">${esc(c.title || c.channel)}</div><button class="link" onclick="${shut}">Zamknij</button></div>
-    <div class="sub" style="margin:4px 0 10px">${esc(c.channel)}, ${when(c.created)}, ${c.len || '?'} s, ${esc(c.reason)}</div>
+    <div class="sub" style="margin:4px 0 10px">${esc(c.channel)}, ${when(c.created)}, ${c.len || '?'} s, ${esc(c.reason)}${c.layout ? ', układ: ' + esc(c.layout) : ''}</div>
+    ${c.ai_note ? `<div class="sub" style="margin:-4px 0 10px;color:var(--text)">AI: ${esc(c.ai_note)}</div>` : ''}
     <span class="tag ${c.review === 'ok' ? 'ok' : ''}">${c.review === 'ok' ? 'zatwierdzony' : 'do przejrzenia'}</span>
     ${c.score ? `<div class="row" style="margin:14px 0 6px"><b class="num ${cls(sc.total)}" style="font-size:34px">${sc.total}</b><span class="sub">ocena na 100</span></div>` : ''}
     ${sc.parts.map(p => `<div class="part"><span>${esc(p.name)}</span><div class="bar"><b style="width:${p.score / p.max * 100}%"></b></div><span class="num sub">${p.score}/${p.max}</span></div>`).join('')}
@@ -620,7 +621,7 @@ const FIELDS = [
     ['kw_color', 'Kolor wyróżnionych słów', 'color'], ['silence_gap', 'Wycinaj ciszę dłuższą niż (s)', 'num', 0.5], ['game_zoom', 'Przybliżenie gry w układzie z kamerką (1 = cały obraz)', 'num', 0.05],
     ['audio_db', 'Skok głośności: o ile dB ponad zwykły poziom', 'num', 1], ['auto_delete_below', 'Kasuj klipy z oceną poniżej (0 = nie kasuj)', 'num', 1]]],
   ['AI (ocena klipów i dobór ustawień kanału)', [['ai_mode', 'Skąd AI', 'sel', [['api', 'Klucz API Anthropic'], ['cli', 'Claude Code (logowanie kontem Claude)']]],
-    ['auto_ai_tune', 'AI samo dobiera opcje każdego kanału raz na dobę', 'bool'], ['gta_auto', 'Detektor GTA włącza się sam, gdy kampania lub stream dotyczy GTA', 'bool'], ['ai_cut_all', 'AI wybiera fragment i tytuł każdego klipu', 'bool'],
+    ['auto_ai_tune', 'AI samo dobiera opcje każdego kanału raz na dobę', 'bool'], ['ai_veto', 'AI odrzuca klipy, w których nic się nie dzieje', 'bool'], ['smart_layout', 'Układ dobierany do każdego klipu (kamerka szukana po twarzy)', 'bool'], ['gta_auto', 'Detektor GTA włącza się sam, gdy kampania lub stream dotyczy GTA', 'bool'], ['ai_cut_all', 'AI wybiera fragment i tytuł każdego klipu', 'bool'],
     ['ai_key', 'Klucz API (tylko dla trybu z kluczem)', 'pass'], ['ai_model', 'Model (tylko dla trybu z kluczem)', 'text']]],
 ];
 // pola widoczne tylko wtedy, gdy ma to sens (np. styl napisow tylko przy wlaczonych napisach)
