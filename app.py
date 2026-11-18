@@ -72,6 +72,7 @@ DEFAULTS = {
     "silence_gap": 2.5,       # przerwy bez mowy dluzsze niz tyle sekund sa wycinane
     "audio_db": 8.0,          # o ile dB glosniej niz zwykle, zeby zrobic klip
     "player_volume": 1.0, "player_muted": False,   # zapamietana glosnosc odtwarzacza w panelu
+    "theme": "dark",          # motyw panelu: dark albo light
     "learn_apply": True,      # sam zmieniaj ustawienia na to, co daje wiecej wyswietlen
     "learn_explore": True,    # co ktorys klip rob w innym wariancie, zeby bylo co porownywac
     "ai_cut_all": True,       # gdy AI jest dostepne, to ono wybiera fragment i tytul kazdego klipu
