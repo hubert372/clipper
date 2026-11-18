@@ -37,6 +37,7 @@ DATA = BASE / "data"
 REC = DATA / "recordings"
 CLIPS = DATA / "clips"
 CFG = DATA / "config.json"
+RUNTIME = DATA / "runtime.json"
 CLIPS_DB = DATA / "clips.json"
 HOST, PORT = "127.0.0.1", 8765
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -1014,6 +1015,7 @@ class Channel:
             rep = (1 - len(self.texts) / count) if count >= 4 and self.texts else 0.0
         self.users, self.texts = set(), {}
         self.hist.append(count)
+        self.app.save_runtime()
         self.maybe_tune()
         ready = s["auto_clip"] and self.state == "live" and time.time() - self.last_clip >= s["cooldown_sec"]
         if s["auto_detect"]:
@@ -1177,6 +1179,43 @@ class App:
                 self.channels[c["name"]].sens = max(2.5, min(8.0, float(c.get("sens", 4.0))))
             except (TypeError, ValueError):
                 pass
+        self._rt = 0.0
+        self.load_runtime()
+
+    def save_runtime(self, force=False):
+        """Zapisuje to, czego automat nauczyl sie o czacie i dzwieku kanalow, zeby po restarcie nie zaczynal od zera."""
+        if not force and time.time() - self._rt < 30:
+            return
+        self._rt = time.time()
+        try:
+            data = {"t": time.time(), "channels": {c.name: {
+                "hist": list(c.hist), "uhist": list(c.uhist), "vol": list(c.vol), "sens": c.sens,
+                "fired": list(c.fired), "last_clip": c.last_clip, "emo_hist": list(c.emo_hist)}
+                for c in self.channels.values() if c.hist or c.uhist}}
+            tmp = RUNTIME.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data), "utf-8")
+            tmp.replace(RUNTIME)
+        except Exception:
+            pass
+
+    def load_runtime(self):
+        try:
+            data = json.loads(RUNTIME.read_text("utf-8"))
+            if time.time() - float(data.get("t", 0)) > 12 * 3600:      # starsze niz 12 h nie opisuje juz tego streama
+                return
+            for name, d in (data.get("channels") or {}).items():
+                c = self.channels.get(name)
+                if not c:
+                    continue
+                c.hist.extend(int(x) for x in d.get("hist", []))
+                c.uhist.extend(int(x) for x in d.get("uhist", []))
+                c.vol.extend(float(x) for x in d.get("vol", []))
+                c.fired.extend(float(x) for x in d.get("fired", []))
+                c.emo_hist.extend(d.get("emo_hist", []))
+                c.last_clip = float(d.get("last_clip", 0) or 0)
+                c.sens = max(2.5, min(8.0, float(d.get("sens", c.sens))))
+        except Exception:
+            pass
 
     def start(self):
         threading.Thread(target=self._worker, daemon=True).start()
