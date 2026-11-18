@@ -114,6 +114,20 @@ video:fullscreen{object-fit:contain!important;aspect-ratio:auto!important;backgr
 .pubrow textarea{width:100%;min-height:62px;resize:vertical;font-size:13px}
 .pubrow .ctl{display:flex;flex-direction:column;gap:6px;align-items:flex-end;font-size:12px;color:var(--sub)}
 .pubrow input[type=number]{width:96px;text-align:right}
+.cpick{position:relative}
+.cbtn{all:unset;cursor:pointer;display:flex;align-items:center;gap:8px;padding:5px 12px 5px 6px;border:1px solid var(--edge);border-radius:9999px;font:600 13px var(--head);max-width:230px}
+.cbtn:hover{border-color:rgba(255,98,7,.5)}.cbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ico{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font:800 13px var(--head);color:#fff;flex:none}
+.cnt{min-width:24px;height:24px;padding:0 7px;border-radius:9999px;background:var(--fill);border:1px solid var(--edge);display:grid;place-items:center;font:700 12px var(--head);font-variant-numeric:tabular-nums;flex:none}
+.cnt.hot{background:var(--tint);color:var(--cyan);border-color:transparent}
+.cmenu{position:absolute;right:0;top:calc(100% + 10px);width:340px;background:var(--panel);border:1px solid var(--edge);border-radius:16px;padding:6px;z-index:6;box-shadow:0 18px 50px rgba(0,0,0,.35);animation:up .18s var(--ease) both}
+.cmenu button{all:unset;cursor:pointer;display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:12px;width:100%;box-sizing:border-box}
+.cmenu button:hover{background:var(--fill)}
+.cmenu .t{font:700 14px var(--head);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmenu .need{font-size:12px;font-weight:600;color:var(--cyan)}.cmenu .need.zero{color:var(--sub)}
+.cmenu .lab{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--sub);padding:10px 12px 4px}
+.cmenu hr{border:0;border-top:1px solid var(--edge);margin:6px 0}
+.todo{display:flex;align-items:center;gap:12px;padding:11px 0;border-top:1px solid var(--edge)}.todo:first-of-type{border-top:0}
 .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;grid-column:1/-1}
 .steps .card b{display:block;font:800 26px var(--head);color:var(--cyan);letter-spacing:-.035em;margin-bottom:8px}
 .toast{position:fixed;right:22px;bottom:22px;z-index:5;background:var(--panel);border:1px solid rgba(255,98,7,.5);border-radius:9999px;padding:10px 18px;opacity:0;transform:translateY(8px);transition:.25s var(--ease);pointer-events:none}
@@ -124,7 +138,7 @@ video:fullscreen{object-fit:contain!important;aspect-ratio:auto!important;backgr
 .reveal .bar b{animation:fill .7s var(--ease) both;transform-origin:left}
 .reveal .card:nth-child(2){animation-delay:50ms}.reveal .card:nth-child(3){animation-delay:100ms}.reveal .card:nth-child(4){animation-delay:150ms}
 .reveal .card:nth-child(5){animation-delay:200ms}.reveal .card:nth-child(6){animation-delay:250ms}.reveal .card:nth-child(n+7){animation-delay:300ms}
-@media(max-width:1500px){.status .chip:not(.ok){display:none}nav{gap:10px;padding:10px 16px}}
+@media(max-width:1700px){.status .chip:not(.ok){display:none}nav{gap:10px;padding:10px 16px}}
 @media(max-width:860px){nav{flex-wrap:wrap;padding:8px 12px}.status .chip:not(.ok){display:none}main{padding:20px 14px 90px}.split,.viewer{grid-template-columns:1fr}.viewer video{max-height:56vh}
 .pubrow{grid-template-columns:1fr}.pubrow .ctl{align-items:flex-start}h1{font-size:28px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -146,8 +160,8 @@ video:fullscreen{object-fit:contain!important;aspect-ratio:auto!important;backgr
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let saved = ''; try { saved = localStorage.getItem('clipper_view') || ''; } catch {}
-let S = null, view = ['monitor','clips','rating','editor','publish','campaigns','insights','stats','settings'].find(v => v === (location.hash.slice(1) || saved)) || 'channels', sel = null, sig = '', known = null, filt = {ch: '', sort: 'best', rev: ''}, aiBusy = false, addAI = false;
-const VIEWS = [['channels', 'Kanały'], ['monitor', 'Monitor'], ['clips', 'Klipy'], ['rating', 'Ocena'], ['editor', 'Edytor'], ['publish', 'Publikacja'], ['campaigns', 'Kampanie'], ['insights', 'Wnioski'], ['stats', 'Statystyki'], ['settings', 'Ustawienia']];
+let S = null, view = ['channels','monitor','clips','rating','editor','publish','campaigns','insights','stats','settings'].find(v => v === (location.hash.slice(1) || saved)) || 'home', sel = null, sig = '', known = null, filt = {ch: '', sort: 'best', rev: ''}, aiBusy = false, addAI = false;
+const VIEWS = [['home', 'Start'], ['channels', 'Kanały'], ['monitor', 'Monitor'], ['clips', 'Klipy'], ['rating', 'Ocena'], ['editor', 'Edytor'], ['publish', 'Publikacja'], ['campaigns', 'Kampanie'], ['insights', 'Wnioski'], ['stats', 'Statystyki'], ['settings', 'Ustawienia']];
 
 async function post(path, body, quiet) {
   let j = {};
@@ -198,14 +212,78 @@ async function checkUpdate() {
   updating = 'Instaluję…'; drawNav(); toast('Pobrano aktualizację. Clipper uruchomi się ponownie.');
   const wait = setInterval(async () => { try { const s = await (await fetch('/api/state')).json(); if (s.version !== S.version) { clearInterval(wait); location.reload(); } } catch {} }, 1500);
 }
+/* ---------- co wymaga uwagi ---------- */
+const PLAT_N = {shorts: 'Shorts', tiktok: 'TikTok', reels: 'Reels'};
+function needs(cid) {       // cid: id kampanii, '' = wszystko
+  const out = {submit: [], review: [], post: [], views: []};
+  S.clips.forEach(c => { if (c.status !== 'ready' || c.kind === 'montage' || (cid && !(c.camp && c.camp.id === cid))) return;
+    const pub = c.pub || {}, done = Object.keys(PLAT_N).filter(k => (pub[k] || {}).done);
+    if (c.review !== 'ok') return out.review.push({c});
+    if (!done.length) out.post.push({c});
+    done.forEach(k => { const p = pub[k];
+      if (c.camp && !p.sub) out.submit.push({c, k, left: Math.ceil((1800 - (S.now - (p.done_at || S.now))) / 60)});
+      if (!p.views && S.now - (p.done_at || S.now) > 86400) out.views.push({c, k}); }); });
+  out.submit.sort((a, b) => a.left - b.left); out.review.sort((a, b) => (b.c.pot ?? 0) - (a.c.pot ?? 0)); out.post.sort((a, b) => (b.c.pot ?? 0) - (a.c.pot ?? 0));
+  out.total = out.submit.length + out.review.length + out.post.length + out.views.length;
+  return out;
+}
+const hue = t => { let h = 0; for (const ch of t) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 62% 42%)`; };
+const ico = t => `<span class="ico" style="background:${hue(t)}">${esc((t.replace(/[^\p{L}\p{N}]/gu, '')[0] || '?').toUpperCase())}</span>`;
+let menuOpen = false;
+function campButton() { const c = curCamp(), n = needs(c ? c.id : '').total;
+  return `<button class="cbtn" aria-haspopup="true" aria-expanded="${menuOpen}" onclick="event.stopPropagation();menuOpen=!menuOpen;drawNav()">${c ? ico(c.title) : '<span class="ico" style="background:var(--fill);color:var(--text)">▦</span>'}
+    <span>${esc(c ? c.title : 'Wszystkie kampanie')}</span><b class="cnt ${n ? 'hot' : ''}">${n}</b></button>`; }
+function campMenu() { const all = needs('').total, row = (id, icon, title, n, on) => `<button onclick="menuOpen=false;setCamp('${id}')">${icon}<span class="grow" style="min-width:0"><div class="t">${esc(title)}</div>
+    <div class="need ${n ? '' : 'zero'}">${n ? n + ' wymaga uwagi' : 'wszystko zrobione'}</div></span><b class="cnt">${n}</b><span style="width:16px;color:var(--cyan)">${on ? '✓' : ''}</span></button>`;
+  return `<div class="cmenu" onclick="event.stopPropagation()">${row('', '<span class="ico" style="background:var(--fill);color:var(--text)">▦</span>', 'Wszystkie kampanie', all, !S.settings.campaign)}
+    <div class="lab">KAMPANIE · ${S.campaigns.length}</div>${S.campaigns.map(c => row(c.id, ico(c.title), c.title, needs(c.id).total, c.id === S.settings.campaign)).join('')}
+    <hr><button onclick="menuOpen=false;go('campaigns')"><span class="ico" style="background:none;border:1px dashed var(--sub);color:var(--text)">+</span><span class="t" style="flex:none">Nowa kampania</span><span class="grow"></span>
+      <span class="sub">z linku lub z listy</span></button></div>`; }
+document.addEventListener('click', () => { if (menuOpen) { menuOpen = false; drawNav(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && menuOpen) { menuOpen = false; drawNav(); } });
+
+/* ---------- start: najpilniejsze rzeczy ---------- */
+function vHome() {
+  const cid = S.settings.campaign, n = needs(cid), c = curCamp(), live = S.channels.filter(x => x.state === 'live');
+  const alerts = [];
+  if (!S.deps.ffmpeg) alerts.push(['Brak FFmpeg, więc klipy nie powstaną.', 'Otwórz Kanały', "go('channels')"]);
+  if (S.deps.caption_error && S.settings.captions) alerts.push(['Napisy nie zadziałały przy ostatnim klipie: ' + S.deps.caption_error, 'Ustawienia', "go('settings')"]);
+  if (S.ai_status.ok === false) alerts.push(['AI nie odpowiada: ' + S.ai_status.msg, 'Ustawienia', "go('settings')"]);
+  if (!S.channels.length) alerts.push(['Nie obserwujesz jeszcze żadnego kanału.', 'Dodaj kanał', "go('channels')"]);
+  if (c && !c.channels.length) alerts.push(['Wybrana kampania nie ma przypisanego kanału.', 'Przypisz kanał', 'editCamp(curCamp())']);
+  const sec = (title, hint, rows, more) => rows.length ? `<div class="card" style="margin-bottom:16px"><div class="row"><div class="name grow">${title}</div><b class="cnt hot">${rows.length + (more || 0)}</b></div>
+    <p class="sub" style="margin:2px 0 6px">${hint}</p>${rows.join('')}${more ? `<p class="sub" style="padding-top:8px">i jeszcze ${more}</p>` : ''}</div>` : '';
+  const item = (x, extra, btns) => `<div class="todo">${x.c.pot != null ? `<b class="cnt ${cls(x.c.pot)}" style="border-color:currentColor">${x.c.pot}</b>` : ''}<div class="grow" style="min-width:0"><button class="link" style="color:var(--text);font-size:14px" onclick="openClip('${x.c.id}')">${esc(x.c.title || x.c.channel)}</button>
+    <div class="sub">${esc(x.c.channel)}${x.c.camp && !cid ? ', ' + esc((S.campaigns.find(k => k.id === x.c.camp.id) || {title: x.c.camp.name}).title) : ''}${extra ? ', ' + extra : ''}</div></div>${btns}</div>`;
+  const cut = (arr, f) => [arr.slice(0, 6).map(f), Math.max(0, arr.length - 6)];
+  const [s1, m1] = cut(n.submit, x => item(x, `<span style="color:${x.left <= 5 ? 'var(--hot)' : 'var(--amber)'}">${PLAT_N[x.k]}: ${x.left > 0 ? 'zostało ' + x.left + ' min' : 'termin minął'}</span>`,
+    `${x.c.camp.url ? `<a class="b" style="text-decoration:none" href="${esc(x.c.camp.url)}" target="_blank" rel="noopener">Otwórz kampanię</a>` : ''}<button class="b go" onclick="pub('${x.c.id}','${x.k}',{sub:true});refresh(true)">Zgłoszone</button>`));
+  const [s2, m2] = cut(n.review, x => item(x, when(x.c.created) + (x.c.risk ? ', <span style="color:var(--hot)">uwaga AI</span>' : ''),
+    `<button class="b" onclick="openClip('${x.c.id}')">Obejrzyj</button><button class="b go" onclick="post('/api/clips/review',{id:'${x.c.id}',ok:true})">Zatwierdź</button><button class="b bad" onclick="post('/api/clips/review',{id:'${x.c.id}',ok:false})">Odrzuć</button>`));
+  const [s3, m3] = cut(n.post, x => item(x, (x.c.len || '?') + ' s', `<a class="b" style="text-decoration:none" href="${src(x.c)}" download="${esc(x.c.file)}">Pobierz</a><button class="b go" onclick="go('publish')">Opisy i publikacja</button>`));
+  const [s4, m4] = cut(n.views, x => item(x, PLAT_N[x.k] + ', wrzucony ponad dobę temu', `<button class="b go" onclick="go('publish')">Wpisz wyświetlenia</button>`));
+  const st = c ? (S.camp_stats || {})[c.id] || {views: 0} : null;
+  return `<h1>${c ? esc(c.title) : 'Start'}</h1><p class="lead">${n.total ? 'Najpilniejsze rzeczy, od tych z terminem.' : 'Nic nie czeka na Ciebie. Clipper pracuje w tle.'}</p>
+  <div class="tiles"><div class="card tile"><b style="color:${n.submit.length ? 'var(--hot)' : 'inherit'}">${n.submit.length}</b><span class="sub">linków do zgłoszenia</span></div>
+    <div class="card tile"><b>${n.review.length}</b><span class="sub">klipów do przejrzenia</span></div><div class="card tile"><b>${n.post.length}</b><span class="sub">zatwierdzonych do wrzucenia</span></div>
+    <div class="card tile"><b>${live.length} / ${S.channels.length}</b><span class="sub">kanałów na żywo${S.queue ? ', ' + S.queue + ' w kolejce' : ''}</span></div>
+    ${st && c.min_views ? `<div class="card tile"><b>${Math.round(st.views / c.min_views * 100)}%</b><span class="sub">minimum wyświetleń kampanii</span><div class="bar" style="margin-top:8px"><b style="width:${Math.min(100, st.views / c.min_views * 100)}%"></b></div></div>` : ''}</div>
+  ${alerts.map(([t, b, f]) => `<div class="card warn row"><span class="grow">${esc(t)}</span><button class="b" onclick="${f}">${b}</button></div>`).join('')}
+  ${sec('Zgłoś linki w kampanii', 'Kampanie zwykle wymagają zgłoszenia w ciągu 30 minut od publikacji.', s1, m1)}
+  ${sec('Przejrzyj nowe klipy', 'Od najwyższego potencjału. Odrzucone klipy są kasowane.', s2, m2)}
+  ${sec('Wrzuć zatwierdzone klipy', 'Pobierz klip i skopiuj opis w zakładce Publikacja.', s3, m3)}
+  ${sec('Uzupełnij wyniki', 'Z wyświetleń Clipper uczy się, co działa.', s4, m4)}
+  ${live.length ? `<div class="card"><div class="name">Na żywo teraz</div>${live.map(x => `<div class="todo"><span class="dot live"></span><div class="grow"><b>${esc(x.name)}</b><div class="sub">${statusText(x)}${x.auto ? ', wynik ' + x.score.toFixed(1) + ' z ' + x.sens.toFixed(1) : ''}</div></div>
+    <button class="b" onclick="post('/api/clip',{name:'${x.name}'})">Klip teraz</button></div>`).join('')}</div>` : ''}`;
+}
+
 function drawNav() {
   const live = S ? S.channels.filter(c => c.state === 'live').length : 0;
   const last = S && S.clips.find(c => c.status === 'ready');
   $('nav').innerHTML = '<div class="brand"><i></i>Clipper</div><div class="tabs">' +
     VIEWS.map(([k, t]) => { const n = k === 'channels' ? live : k === 'clips' && S ? ready().filter(c => c.review === 'new').length : 0;
       return `<button class="${k === view ? 'on' : ''}" onclick="go('${k}')">${t}${n ? `<span class="n">${n}</span>` : ''}</button>`; }).join('') + '</div>' +
-    (S ? `<div class="status">${S.campaigns.length ? `<select aria-label="Kampania, na której pracujesz" onchange="setCamp(this.value)" style="border-radius:9999px;padding:5px 10px;font-size:13px;max-width:190px">
-      <option value="">Wszystkie kampanie</option>${S.campaigns.map(c => `<option value="${c.id}" ${c.id === S.settings.campaign ? 'selected' : ''}>${esc(c.title)}</option>`).join('')}</select>` : ''}<span class="chip ${S.paused ? '' : 'ok'}">${S.paused ? 'Wstrzymany' : 'Działa'}</span>
+    (S ? `<div class="status"><div class="cpick">${campButton()}${menuOpen ? campMenu() : ''}</div><span class="chip ${S.paused ? '' : 'ok'}">${S.paused ? 'Wstrzymany' : 'Działa'}</span>
       <span class="chip" title="Kanały na żywo">Na żywo ${live}/${S.channels.length}</span><span class="chip" title="Ostatni klip: ${last ? when(last.created) : 'brak'}">Kolejka ${S.queue}</span>
       <button class="b ${S.paused ? 'go' : ''}" onclick="post('/api/pause',{paused:${!S.paused}})">${S.paused ? 'Start' : 'Pauza'}</button></div>` : '');
   if (document.activeElement && document.activeElement.closest && document.activeElement.closest('nav select')) return;
@@ -679,8 +757,8 @@ function vInsights() {
   <p class="sub" style="margin-top:10px">Żeby było co porównywać, mniej więcej co trzeci automatyczny klip powstaje w jednym zmienionym wariancie (inny styl napisów, długość albo efekt). Wyłączysz to w Ustawieniach.</p>`;
 }
 
-const RENDER = {channels: vChannels, monitor: vMonitor, clips: vClips, rating: vRating, editor: vEditor, publish: vPublish, campaigns: vCampaigns, insights: vInsights, stats: vStats, settings: vSettings};
-const LIVE = {channels: 1, monitor: 1, stats: 1, insights: 1};       // widoki odswiezane co 2 s; pozostale tylko przy zmianie klipow
+const RENDER = {home: vHome, channels: vChannels, monitor: vMonitor, clips: vClips, rating: vRating, editor: vEditor, publish: vPublish, campaigns: vCampaigns, insights: vInsights, stats: vStats, settings: vSettings};
+const LIVE = {home: 1, channels: 1, monitor: 1, stats: 1, insights: 1};       // widoki odswiezane co 2 s; pozostale tylko przy zmianie klipow
 function draw(force) {
   if (!S) return;
   const s2 = S.clips.map(c => c.id + c.status + (c.rev || 0) + (c.title || '') + (c.ai ? 1 : 0) + (c.review || '')).join();
@@ -689,6 +767,7 @@ function draw(force) {
   sig = s2;
   const log = $('log'), top = log ? log.scrollTop : null;
   const bar = ['channels', 'clips', 'publish', 'rating', 'stats'].includes(view) ? campBar() : '';
+  if (view === 'home' && !force && document.querySelector('#view .todo:hover')) return;   // nie przerysowuj pod kursorem
   $('view').innerHTML = bar + (S.paused ? `<div class="card warn row" style="border-color:var(--violet);color:var(--text)"><span class="grow">Clipper jest wstrzymany. Kanały nie są nagrywane i klipy nie powstają.</span>
     <button class="b go" onclick="post('/api/pause',{paused:false})">Start</button></div>` : '') + RENDER[view]();
   if (view === 'settings') { styleKey = ''; snap = JSON.stringify(collect()); applyDeps(); }
