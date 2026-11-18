@@ -78,6 +78,7 @@ DEFAULTS = {
     "learn_apply": True,      # sam zmieniaj ustawienia na to, co daje wiecej wyswietlen
     "learn_explore": True,    # co ktorys klip rob w innym wariancie, zeby bylo co porownywac
     "ai_cut_all": True,       # gdy AI jest dostepne, to ono wybiera fragment i tytul kazdego klipu
+    "auto_start": True,       # po uruchomieniu od razu pilnuj kanalow (nie pamietaj pauzy z poprzedniego razu)
     "phone_access": False,    # udostepnij gotowe klipy telefonowi w domowej sieci
     "notify_min_score": 0,    # powiadomienia tylko o klipach z ocena co najmniej taka
     "auto_detect": True,      # wykrywanie samo dopasowuje sie do wielkosci czatu i tempa streama
@@ -1153,7 +1154,7 @@ class App:
             except Exception:
                 pass
         self.settings = {**DEFAULTS, **{k: v for k, v in cfg.get("settings", {}).items() if k in DEFAULTS}}
-        self.paused = bool(cfg.get("paused", False))
+        self.paused = bool(cfg.get("paused", False)) and not self.settings["auto_start"]
         self.campaigns = [c for c in cfg.get("campaigns", []) if isinstance(c, dict) and c.get("id")]
         self.learn_log = list(cfg.get("learn_log", []))[-30:]
         self.phone_token = str(cfg.get("phone_token") or secrets.token_urlsafe(9))
