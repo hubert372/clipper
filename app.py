@@ -78,6 +78,7 @@ DEFAULTS = {
     "learn_apply": True,      # sam zmieniaj ustawienia na to, co daje wiecej wyswietlen
     "learn_explore": True,    # co ktorys klip rob w innym wariancie, zeby bylo co porownywac
     "ai_cut_all": True,       # gdy AI jest dostepne, to ono wybiera fragment i tytul kazdego klipu
+    "gta_auto": True,         # sam wlacz detektor GTA, gdy kampania albo tytul/kategoria streama dotyczy GTA
     "auto_start": True,       # po uruchomieniu od razu pilnuj kanalow (nie pamietaj pauzy z poprzedniego razu)
     "phone_access": False,    # udostepnij gotowe klipy telefonowi w domowej sieci
     "notify_min_score": 0,    # powiadomienia tylko o klipach z ocena co najmniej taka
@@ -109,6 +110,7 @@ except Exception:
     gta_classify = None
 GTA_PL = {"chase": "pościg", "crash": "kraksa", "stunt": "kaskada", "combat": "strzelanina", "npc_chaos": "chaos z NPC",
           "milestone": "misja", "funny_dialogue": "śmieszny dialog", "reaction": "reakcja", "roleplay": "roleplay"}
+GTA_RE = re.compile(r"(?i)\bgta\s*-?\s*(?:6|vi|5|v|online|rp)?\b|grand\s+theft\s+auto")
 GTA_EVENTS = ("chase", "crash", "stunt", "combat", "npc_chaos", "milestone")   # same reakcje nie wyzwalaja klipu
 
 
@@ -847,6 +849,7 @@ class Channel:
         self.vol = deque(maxlen=30)     # glosnosc kolejnych okien (dB)
         self.vol_next = 0.0
         self.gta_next, self.gta_busy, self.gta_seen, self.gta_ai = 0.0, False, {}, 0.0
+        self.meta, self.meta_next = {}, 0.0   # tytul i kategoria streama
         self.gta_note = ""              # ostatnie wydarzenie GTA (do podgladu)
         self.state = "stopped"          # stopped | paused | waiting | live
         self.chat_ok = False
@@ -1128,8 +1131,11 @@ class Channel:
                 if self.state != "live" and path.exists() and path.stat().st_size > 200_000:
                     self.state, self.rec_path, self.live_since = "live", path, time.time()
                     self.app.log("%s: NA ZYWO - nagrywam" % self.name)
-                if (self.state == "live" and self.opts["gta"] and not self.gta_busy and time.time() >= self.gta_next
-                        and self.app.settings["auto_clip"]):
+                if self.state == "live" and time.time() >= self.meta_next and not self.opts["gta"]:
+                    self.meta_next = time.time() + 600
+                    threading.Thread(target=self.fetch_meta, daemon=True).start()
+                if (self.state == "live" and not self.gta_busy and time.time() >= self.gta_next
+                        and self.app.settings["auto_clip"] and self.gta_why()):
                     self.gta_next, self.gta_busy = time.time() + 15, True
                     threading.Thread(target=self.gta_scan, args=(path,), daemon=True).start()
                 if (self.state == "live" and (self.opts["audio_trigger"] or self.app.settings["auto_detect"])
@@ -1147,6 +1153,33 @@ class Channel:
                 if not self._alive(g):
                     return
                 time.sleep(1)
+
+    def gta_why(self):
+        """Dlaczego detektor GTA dziala na tym kanale ('' = nie dziala)."""
+        if not gta_classify:
+            return ""
+        if self.opts["gta"]:
+            return "włączony ręcznie"
+        if not self.app.settings["gta_auto"]:
+            return ""
+        for c in self.app.campaigns:
+            if c.get("active", True) and self.name in (c.get("channels") or []) and GTA_RE.search(
+                    " ".join(str(c.get(k) or "") for k in ("title", "tags", "name"))):
+                return "kampania „%s”" % c["title"][:40]
+        if GTA_RE.search(self.meta.get("category", "")):
+            return "kategoria streama: " + self.meta["category"][:40]
+        if GTA_RE.search(self.meta.get("title", "")):
+            return "tytuł streama"
+        return ""
+
+    def fetch_meta(self):
+        """Tytul i kategoria streama (do samoczynnego wlaczania detektora GTA)."""
+        try:
+            r = run([sys.executable, "-m", "streamlink", "--json", "https://twitch.tv/" + self.name], timeout=40)
+            m = json.loads(r.stdout).get("metadata") or {}
+            self.meta = {"title": str(m.get("title") or ""), "category": str(m.get("category") or "")}
+        except Exception:
+            pass
 
     # --- detektor GTA: co 15 s slucha ostatnich 25 s i szuka wydarzen w tym, co mowi streamer
     def gta_scan(self, path):
@@ -1217,7 +1250,8 @@ class Channel:
                 "auto": auto, "sens": self.sens, "score": self.score,
                 "opts": self.opts, "ai": self.ai, "vol": self.vol[-1] if self.vol else None,
                 "hist": list(self.uhist if auto else self.hist), "cur": self.cur, "kw": self.kw, "thr": self.thr,
-                "live_since": self.live_since, "rec_mb": round(size / 1e6)}
+                "live_since": self.live_since, "rec_mb": round(size / 1e6),
+                "gta": {"why": self.gta_why(), "note": self.gta_note, "stream": self.meta.get("category") or self.meta.get("title") or ""}}
 
 
 # ---------------------------------------------------------------- aplikacja
@@ -1899,7 +1933,7 @@ class App:
                       "cut": len(tl["segs"]) > 1}
         clip.update(file=out, rev=clip.get("rev", 0) + 1, len=round(dur, 1), text=" ".join(shown)[:200],
                     style=s["cap_style"], cap=[[round(x, 2), round(y, 2), t] for (x, y, _), t in zip(words, shown)])
-        if o.get("gta") and not clip.get("gta"):
+        if ch and ch.gta_why() and not clip.get("gta"):
             cue, _ = gta_cues(" ".join(shown))
             if cue:
                 clip["gta"] = {"cat": cue.category, "phrase": cue.phrase[:80]}

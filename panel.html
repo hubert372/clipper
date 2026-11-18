@@ -316,6 +316,7 @@ function vChannels() {
     ${c.ai.state === 'off' ? '' : `<div class="sub" style="margin-bottom:8px;color:${c.ai.state === 'error' ? 'var(--hot)' : c.ai.state === 'done' ? 'var(--mint)' : 'var(--amber)'}">${
       c.ai.state === 'done' ? 'AI dobrało ustawienia. ' + esc(c.ai.note) : c.ai.state === 'error' ? 'AI nie dobrało ustawień: ' + esc(c.ai.note)
       : c.ai.state === 'working' ? 'AI analizuje kanał…' : 'AI czeka, aż kanał będzie na żywo i zbierze 2 minuty czatu.'}</div>`}
+    <div class="sub" style="margin-bottom:8px">${c.gta.why ? `<span style="color:var(--mint)">Detektor GTA działa</span> (${esc(c.gta.why)})${c.gta.note ? '. Ostatnio: ' + esc(c.gta.note) : c.state === 'live' ? '. Słucham streamera.' : '. Ruszy, gdy kanał będzie na żywo.'}` : 'Detektor GTA wyłączony' + (c.gta.stream ? ' (stream: ' + esc(c.gta.stream) + ')' : '')}</div>
     <div class="row"><div class="sub grow">${c.enabled ? (c.chat ? (c.auto ? `${last} osób pisze, wynik ${c.score.toFixed(1)} z ${c.sens.toFixed(1)}` + (c.thr ? '' : ', uczę się czatu') : `${last} wiad. w oknie` + (c.thr ? `, próg ${Math.round(c.thr)}` : ', zbieram średnią')) : 'Łączę z czatem…') : ''}</div>
       <button class="b" ${c.state === 'live' ? '' : 'disabled'} onclick="post('/api/clip',{name:'${c.name}'})">Klip teraz</button>
       <button class="b" onclick="chOpts('${c.name}')">Opcje</button>
@@ -328,7 +329,7 @@ function vChannels() {
 const CH_FIELDS = [['hook', 'Haczyk: krótki klip zaczynający się tuż przed akcją'], ['payoff_first', 'Najpierw puenta (2 s zapowiedzi na początku)'], ['auto_zoom', 'Auto-zoom w szczytowym momencie'],
   ['sticker', 'Emotka z czatu jako naklejka'], ['sfx', 'Efekty dźwiękowe (start i szczyt)'], ['facecam', 'Układ z kamerką (kamerka u góry, gra na dole)'], ['title_bar', 'Nagłówek z tytułem klipu'], ['progress', 'Pasek postępu'],
   ['logo', 'Logo / znak wodny'], ['censor', 'Cenzura przekleństw'], ['cut_silence', 'Wycinanie ciszy'], ['highlight', 'Wyróżnianie słów kluczowych'],
-  ['loudnorm', 'Wyrównanie głośności'], ['ai_cut', 'AI wybiera najlepszy fragment i tytuł (1 zapytanie na klip)'], ['audio_trigger', 'Klip także przy skoku głośności'], ['gta', 'Detektor GTA: klip, gdy streamer mówi o pościgu, kraksie, kaskadzie, strzelaninie lub misji (po angielsku)']];
+  ['loudnorm', 'Wyrównanie głośności'], ['ai_cut', 'AI wybiera najlepszy fragment i tytuł (1 zapytanie na klip)'], ['audio_trigger', 'Klip także przy skoku głośności'], ['gta', 'Detektor GTA zawsze włączony na tym kanale (bez tego włącza się sam przy GTA)']];
 const CAMS = {'Lewy dół': [2, 68, 26, 30], 'Prawy dół': [72, 68, 26, 30], 'Lewy górny': [2, 2, 26, 30], 'Prawy górny': [72, 2, 26, 30]};
 function chOpts(name) {
   const c = S.channels.find(x => x.name === name), o = c.opts, d = $('chdlg');
@@ -619,7 +620,7 @@ const FIELDS = [
     ['kw_color', 'Kolor wyróżnionych słów', 'color'], ['silence_gap', 'Wycinaj ciszę dłuższą niż (s)', 'num', 0.5], ['game_zoom', 'Przybliżenie gry w układzie z kamerką (1 = cały obraz)', 'num', 0.05],
     ['audio_db', 'Skok głośności: o ile dB ponad zwykły poziom', 'num', 1], ['auto_delete_below', 'Kasuj klipy z oceną poniżej (0 = nie kasuj)', 'num', 1]]],
   ['AI (ocena klipów i dobór ustawień kanału)', [['ai_mode', 'Skąd AI', 'sel', [['api', 'Klucz API Anthropic'], ['cli', 'Claude Code (logowanie kontem Claude)']]],
-    ['auto_ai_tune', 'AI samo dobiera opcje każdego kanału raz na dobę', 'bool'], ['ai_cut_all', 'AI wybiera fragment i tytuł każdego klipu', 'bool'],
+    ['auto_ai_tune', 'AI samo dobiera opcje każdego kanału raz na dobę', 'bool'], ['gta_auto', 'Detektor GTA włącza się sam, gdy kampania lub stream dotyczy GTA', 'bool'], ['ai_cut_all', 'AI wybiera fragment i tytuł każdego klipu', 'bool'],
     ['ai_key', 'Klucz API (tylko dla trybu z kluczem)', 'pass'], ['ai_model', 'Model (tylko dla trybu z kluczem)', 'text']]],
 ];
 // pola widoczne tylko wtedy, gdy ma to sens (np. styl napisow tylko przy wlaczonych napisach)
