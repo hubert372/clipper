@@ -3,3 +3,4 @@ streamlink>=7.0
 faster-whisper>=1.0
 segno>=1.5
 opencv-python-headless>=4.9
+yt-dlp>=2025.1.1
